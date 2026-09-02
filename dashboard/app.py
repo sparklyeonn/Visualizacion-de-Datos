@@ -603,7 +603,6 @@ def render_tab(tab, tipo, years, top_n):
                 line=dict(color=color, width=2.5, shape="spline"),
                 marker=dict(size=6, color=color),
                 fill="tozeroy",
-                fillcolor=color.replace("#","rgba(").rstrip(")") + ",0.08)" if "#" in color else color,
                 hovertemplate=f"{tipo_val} %{{x}}: %{{y:,}} contenidos<extra></extra>",
             ))
         # Usar fill con alpha manual
