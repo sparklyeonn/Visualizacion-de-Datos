@@ -130,7 +130,10 @@ external_css = [
     "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
 ]
 
-app = Dash(__name__, external_stylesheets=external_css, title="StreamView Analytics")
+app = Dash(__name__,
+           external_stylesheets=external_css,
+           title="StreamView Analytics")
+server = app.server
 
 # ── SIDEBAR ──────────────────────────────────────────────────────
 sidebar = html.Div([
