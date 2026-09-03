@@ -8,7 +8,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import Dash, dcc, html, Input, Output
+from dash import Dash, dcc, html, Input, Output, ctx
 import dash_bootstrap_components as dbc
 
 warnings.filterwarnings("ignore")
@@ -136,21 +136,19 @@ app = Dash(__name__,
 server = app.server
 
 # ── SIDEBAR ──────────────────────────────────────────────────────
-sidebar = html.Div([
-    # Logo / título
+sidebar_header = html.Div([
     html.Div([
-        html.Div("▶", style={
-            "fontSize":"22px","color":C_ACCENT1,
-            "lineHeight":"1","marginBottom":"2px"
-        }),
         html.Div("StreamView", style={
             "fontSize":"15px","fontWeight":"800","color":C_TEXT,"letterSpacing":"-0.3px"
         }),
         html.Div("Analytics EP1", style={
             "fontSize":"10px","color":C_MUTED,"letterSpacing":"0.5px"
         }),
-    ], style={"marginBottom":"32px"}),
+    ]),
+    html.Button("Menú", id="mobile-menu-btn", n_clicks=0, className="sv-mobile-menu-btn"),
+], className="sv-sidebar-header", style={"marginBottom":"32px"})
 
+sidebar_body = html.Div([
     # Sección filtros
     html.Div("FILTROS", style={
         "fontSize":"9px","fontWeight":"700","color":C_MUTED,
@@ -199,10 +197,10 @@ sidebar = html.Div([
     dcc.RadioItems(
         id="nav-tab",
         options=[
-            {"label":"  📊  Catálogo",            "value":"tab-catalogo"},
-            {"label":"  🌍  Geografía & Idiomas",  "value":"tab-geo"},
-            {"label":"  ⭐  Popularidad",           "value":"tab-pop"},
-            {"label":"  📅  Evolución Temporal",   "value":"tab-temporal"},
+            {"label":"Catálogo",              "value":"tab-catalogo"},
+            {"label":"Geografía & Idiomas",   "value":"tab-geo"},
+            {"label":"Popularidad",           "value":"tab-pop"},
+            {"label":"Evolución Temporal",    "value":"tab-temporal"},
         ],
         value="tab-catalogo",
         labelStyle={
@@ -216,12 +214,17 @@ sidebar = html.Div([
 
     # Notas
     html.Div(style={"borderTop":f"1px solid {C_BORDER}","marginBottom":"16px"}),
-    html.Div("⚠ Popularidad = índice relativo TMDB.", style={
+    html.Div("Popularidad = índice relativo TMDB.", style={
         "fontSize":"10px","color":C_MUTED,"lineHeight":"1.5","marginBottom":"6px"
     }),
-    html.Div("ℹ 1.000 registros/año por categoría.", style={
+    html.Div("1.000 registros/año por categoría.", style={
         "fontSize":"10px","color":C_MUTED,"lineHeight":"1.5"
     }),
+], id="sidebar-body", className="sv-sidebar-body")
+
+sidebar = html.Div([
+    sidebar_header,
+    sidebar_body,
 ], className="sv-sidebar", style={
     "backgroundColor": BG_SIDEBAR,
     "width":"200px","minHeight":"100vh",
@@ -265,15 +268,31 @@ app.layout = html.Div([
 # ── CALLBACKS ────────────────────────────────────────────────────
 
 @app.callback(
+    Output("sidebar-body","className"),
+    Output("mobile-menu-btn","children"),
+    Input("mobile-menu-btn","n_clicks"),
+    Input("nav-tab","value"),
+    prevent_initial_call=True,
+)
+def toggle_mobile_menu(n_clicks, tab):
+    # En móvil, el botón abre/cierra el menú; elegir una vista lo cierra.
+    if ctx.triggered_id == "nav-tab":
+        return "sv-sidebar-body", "Menú"
+    if n_clicks % 2 == 1:
+        return "sv-sidebar-body sv-open", "Cerrar"
+    return "sv-sidebar-body", "Menú"
+
+
+@app.callback(
     Output("page-title","children"),
     Input("nav-tab","value"),
 )
 def update_title(tab):
     titles = {
-        "tab-catalogo": "📊 Composición del Catálogo",
-        "tab-geo":       "🌍 Geografía e Idiomas",
-        "tab-pop":       "⭐ Popularidad y Valoración",
-        "tab-temporal":  "📅 Evolución Temporal",
+        "tab-catalogo": "Composición del Catálogo",
+        "tab-geo":       "Geografía e Idiomas",
+        "tab-pop":       "Popularidad y Valoración",
+        "tab-temporal":  "Evolución Temporal",
     }
     return titles.get(tab, "StreamView Analytics")
 
@@ -464,7 +483,7 @@ def render_tab(tab, tipo, years, top_n):
         fig_lang.update_layout(**lay_l, xaxis_range=[0, lang_s["Cantidad"].max()*1.18])
 
         nota = html.Div(
-            "ℹ Un contenido con coproducción se contabiliza en cada país participante.",
+            "Un contenido con coproducción se contabiliza en cada país participante.",
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )
 
@@ -572,7 +591,7 @@ def render_tab(tab, tipo, years, top_n):
                              xaxis_range=[0, top_pg["Popularidad promedio"].max()*1.18])
 
         nota_pop = html.Div(
-            "⚠ Popularidad = índice relativo TMDB. No equivale a reproducciones. "
+            "Popularidad = índice relativo TMDB. No equivale a reproducciones. "
             "Scatter excluye el 5% extremo de popularidad.",
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )
@@ -644,7 +663,7 @@ def render_tab(tab, tipo, years, top_n):
         fig_rel.update_layout(**lay_rel)
 
         nota_t = html.Div(
-            "ℹ Dataset muestreado: 1.000 registros/año por categoría → "
+            "Dataset muestreado: 1.000 registros/año por categoría → "
             "la distribución temporal uniforme es por diseño, no refleja el ritmo real de incorporación.",
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )

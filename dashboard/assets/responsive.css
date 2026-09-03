@@ -28,3 +28,37 @@
     padding-right: 12px !important;
   }
 }
+
+/* Botón de menú: oculto salvo en teléfono, donde reemplaza los filtros
+   y la navegación por un panel desplegable (en tablet y desktop siguen
+   siempre visibles, como pidió el usuario). */
+.sv-mobile-menu-btn {
+  display: none;
+}
+
+@media (max-width: 575.98px) {
+  .sv-sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .sv-mobile-menu-btn {
+    display: inline-block;
+    background: transparent;
+    border: 1px solid #2D3148;
+    color: #E2E8F0;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .sv-sidebar-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+  }
+  .sv-sidebar-body.sv-open {
+    max-height: 2000px;
+  }
+}
