@@ -1,0 +1,120 @@
+/* StreamView Analytics — sistema de temas (claro / oscuro / automático)
+   El atributo data-theme en <html> lo controla assets/theme_live.js +
+   los clientside callbacks en app.py. Todo lo que NO son gráficos de
+   Plotly usa estas variables, así que el cambio es instantáneo. */
+
+:root {
+  --bg-page: #0F1117;
+  --bg-sidebar: #13151F;
+  --bg-card: #1A1D27;
+  --text-primary: #E2E8F0;
+  --text-on-sidebar: #E2E8F0;
+  --text-muted: #64748B;
+  --text-muted-on-sidebar: #64748B;
+  --border-color: #2D3148;
+  --border-color-sidebar: #2D3148;
+  --accent-primary: #7C3AED;
+  --shadow-card: none;
+}
+
+[data-theme="light"] {
+  --bg-page: #F3F5FA;
+  --bg-sidebar: #2563EB;
+  --bg-card: #FFFFFF;
+  --text-primary: #0F172A;
+  --text-on-sidebar: #FFFFFF;
+  --text-muted: #64748B;
+  --text-muted-on-sidebar: rgba(255,255,255,0.75);
+  --border-color: #E5E9F2;
+  --border-color-sidebar: rgba(255,255,255,0.22);
+  --accent-primary: #2563EB;
+  --shadow-card: 0 1px 2px rgba(15,23,42,0.06), 0 6px 16px rgba(15,23,42,0.06);
+}
+
+html {
+  background-color: var(--bg-page);
+}
+
+/* ── Botón de tema (Claro / Oscuro / Auto) ────────────────────── */
+.sv-theme-toggle {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sv-theme-toggle:hover {
+  border-color: var(--accent-primary);
+}
+
+/* ── Navegación (VISTAS): ítem activo como "pill" ─────────────── */
+/* Overlay translúcido blanco: se ve bien sobre cualquier color de sidebar
+   (azul en claro, navy oscuro en oscuro) sin perderse contra el fondo. */
+.sv-nav-tab label {
+  transition: background-color 0.15s ease, color 0.15s ease, font-weight 0.15s ease;
+}
+.sv-nav-tab label:has(input:checked) {
+  background-color: rgba(255,255,255,0.14);
+  color: var(--text-on-sidebar) !important;
+  font-weight: 700;
+}
+
+/* ── Responsivo (heredado) ────────────────────────────────────── */
+@media (max-width: 991.98px) {
+  .sv-sidebar {
+    position: static !important;
+    width: 100% !important;
+    min-height: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border-color-sidebar);
+  }
+  .sv-main {
+    margin-left: 0 !important;
+  }
+}
+
+@media (max-width: 575.98px) {
+  .sv-header {
+    padding: 16px !important;
+  }
+  .sv-kpi-row,
+  .sv-tab-content {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+}
+
+.sv-mobile-menu-btn {
+  display: none;
+}
+
+@media (max-width: 575.98px) {
+  .sv-sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .sv-mobile-menu-btn {
+    display: inline-block;
+    background: transparent;
+    border: 1px solid var(--border-color-sidebar);
+    color: var(--text-on-sidebar);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .sv-sidebar-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.25s ease;
+  }
+  .sv-sidebar-body.sv-open {
+    max-height: 2000px;
+  }
+}

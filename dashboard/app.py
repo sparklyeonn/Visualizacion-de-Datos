@@ -8,27 +8,39 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import Dash, dcc, html, Input, Output, ctx
+from dash import Dash, dcc, html, Input, Output, State, ctx
 import dash_bootstrap_components as dbc
 
 warnings.filterwarnings("ignore")
 
-# ── PALETA OSCURA ────────────────────────────────────────────────
-BG_MAIN    = "#0F1117"   # fondo general
-BG_CARD    = "#1A1D27"   # tarjetas
-BG_SIDEBAR = "#13151F"   # sidebar
-BG_CHART   = "#1A1D27"   # fondo gráficos
+# ── COLORES DE INTERFAZ (chrome) ────────────────────────────────
+# Usan variables CSS (definidas en assets/theme.css) para que el cambio
+# de tema claro/oscuro/automático sea instantáneo, sin recargar nada.
+BG_MAIN              = "var(--bg-page)"
+BG_CARD              = "var(--bg-card)"
+BG_SIDEBAR           = "var(--bg-sidebar)"
+C_TEXT               = "var(--text-primary)"
+C_TEXT_SIDEBAR       = "var(--text-on-sidebar)"
+C_MUTED              = "var(--text-muted)"
+C_MUTED_SIDEBAR      = "var(--text-muted-on-sidebar)"
+C_BORDER             = "var(--border-color)"
+C_ACCENT_PRIMARY     = "var(--accent-primary)"   # color de marca: azul en claro, violeta en oscuro
 
+# ── COLORES DE GRÁFICOS (Plotly) ────────────────────────────────
+# Plotly dibuja en SVG y no resuelve var(css) de forma confiable, así que
+# estos necesitan valores literales según el tema resuelto (claro/oscuro).
+CHART_THEMES = {
+    "dark":  dict(bg="#1A1D27", text="#E2E8F0", muted="#64748B", border="#2D3148"),
+    "light": dict(bg="#FFFFFF", text="#0F172A", muted="#64748B", border="#E2E8F0"),
+}
+
+# Colores categóricos — se mantienen iguales en ambos temas (identidad de datos)
 C_ACCENT1  = "#7C3AED"   # violeta principal
 C_ACCENT2  = "#06B6D4"   # cyan
 C_ACCENT3  = "#F472B6"   # rosa/magenta
 C_ACCENT4  = "#10B981"   # verde esmeralda
 C_MOVIE    = "#7C3AED"   # películas → violeta
 C_SHOW     = "#06B6D4"   # series → cyan
-
-C_TEXT     = "#E2E8F0"   # texto principal
-C_MUTED    = "#64748B"   # texto secundario
-C_BORDER   = "#2D3148"   # bordes
 
 FONT = "Inter, system-ui, sans-serif"
 
@@ -74,34 +86,35 @@ def filtrar(tipo="Todos", year_range=None):
         df = df[(df["year_added"] >= year_range[0]) & (df["year_added"] <= year_range[1])]
     return df
 
-def base_layout(title=""):
+def base_layout(title="", bg="#1A1D27", text="#E2E8F0", muted="#64748B", border="#2D3148"):
     return dict(
-        title=dict(text=title, font=dict(size=13, color=C_TEXT, family=FONT), x=0, pad=dict(l=4)),
-        plot_bgcolor=BG_CHART,
-        paper_bgcolor=BG_CHART,
-        font=dict(family=FONT, size=11, color=C_TEXT),
+        title=dict(text=title, font=dict(size=13, color=text, family=FONT), x=0, pad=dict(l=4)),
+        plot_bgcolor=bg,
+        paper_bgcolor=bg,
+        font=dict(family=FONT, size=11, color=text),
         margin=dict(l=8, r=16, t=44, b=8),
         legend=dict(
             orientation="h", yanchor="bottom", y=1.01,
             xanchor="right", x=1,
-            font=dict(size=10, color=C_MUTED),
+            font=dict(size=10, color=muted),
             bgcolor="rgba(0,0,0,0)"
         ),
-        hoverlabel=dict(bgcolor=BG_CARD, font_size=12, font_color=C_TEXT,
-                        bordercolor=C_BORDER),
-        xaxis=dict(showgrid=True, gridcolor=C_BORDER, gridwidth=1,
-                   zeroline=False, tickfont=dict(color=C_MUTED, size=10),
-                   title_font=dict(color=C_MUTED, size=10)),
-        yaxis=dict(showgrid=True, gridcolor=C_BORDER, gridwidth=1,
-                   zeroline=False, tickfont=dict(color=C_MUTED, size=10),
-                   title_font=dict(color=C_MUTED, size=10)),
+        hoverlabel=dict(bgcolor=bg, font_size=12, font_color=text,
+                        bordercolor=border),
+        xaxis=dict(showgrid=True, gridcolor=border, gridwidth=1,
+                   zeroline=False, tickfont=dict(color=muted, size=10),
+                   title_font=dict(color=muted, size=10)),
+        yaxis=dict(showgrid=True, gridcolor=border, gridwidth=1,
+                   zeroline=False, tickfont=dict(color=muted, size=10),
+                   title_font=dict(color=muted, size=10)),
     )
 
 def card(children, padding="20px", height=None):
     style = {
         "backgroundColor": BG_CARD,
-        "borderRadius": "12px",
+        "borderRadius": "16px",
         "border": f"1px solid {C_BORDER}",
+        "boxShadow": "var(--shadow-card)",
         "padding": padding,
         "height": height or "auto",
     }
@@ -139,14 +152,14 @@ server = app.server
 sidebar_header = html.Div([
     html.Div([
         html.Div("▶", style={
-            "fontSize":"22px","color":C_ACCENT1,
+            "fontSize":"22px","color":C_TEXT_SIDEBAR,
             "lineHeight":"1","marginBottom":"2px"
         }),
         html.Div("StreamView", style={
-            "fontSize":"15px","fontWeight":"800","color":C_TEXT,"letterSpacing":"-0.3px"
+            "fontSize":"15px","fontWeight":"800","color":C_TEXT_SIDEBAR,"letterSpacing":"-0.3px"
         }),
         html.Div("Analytics EP1", style={
-            "fontSize":"10px","color":C_MUTED,"letterSpacing":"0.5px"
+            "fontSize":"10px","color":C_MUTED_SIDEBAR,"letterSpacing":"0.5px"
         }),
     ]),
     html.Button("Menú", id="mobile-menu-btn", n_clicks=0, className="sv-mobile-menu-btn"),
@@ -155,24 +168,24 @@ sidebar_header = html.Div([
 sidebar_body = html.Div([
     # Sección filtros
     html.Div("FILTROS", style={
-        "fontSize":"9px","fontWeight":"700","color":C_MUTED,
+        "fontSize":"9px","fontWeight":"700","color":C_MUTED_SIDEBAR,
         "letterSpacing":"1.5px","marginBottom":"14px"
     }),
 
     html.Div("Tipo de contenido", style={
-        "fontSize":"11px","fontWeight":"600","color":C_TEXT,"marginBottom":"8px"
+        "fontSize":"11px","fontWeight":"600","color":C_TEXT_SIDEBAR,"marginBottom":"8px"
     }),
     dcc.RadioItems(
         id="filtro-tipo",
         options=[{"label": f"  {t}", "value": t} for t in ["Todos","Película","Serie"]],
         value="Todos",
-        labelStyle={"display":"block","marginBottom":"8px","fontSize":"12px","color":C_MUTED,"cursor":"pointer"},
-        inputStyle={"marginRight":"8px","accentColor":C_ACCENT1},
+        labelStyle={"display":"block","marginBottom":"8px","fontSize":"12px","color":C_MUTED_SIDEBAR,"cursor":"pointer"},
+        inputStyle={"marginRight":"8px","accentColor":C_ACCENT_PRIMARY},
         style={"marginBottom":"24px"}
     ),
 
     html.Div("Años de incorporación", style={
-        "fontSize":"11px","fontWeight":"600","color":C_TEXT,"marginBottom":"10px"
+        "fontSize":"11px","fontWeight":"600","color":C_TEXT_SIDEBAR,"marginBottom":"10px"
     }),
     dcc.RangeSlider(
         id="filtro-years",
@@ -185,7 +198,7 @@ sidebar_body = html.Div([
     html.Div(style={"marginBottom":"24px"}),
 
     html.Div("Ítems en rankings", style={
-        "fontSize":"11px","fontWeight":"600","color":C_TEXT,"marginBottom":"10px"
+        "fontSize":"11px","fontWeight":"600","color":C_TEXT_SIDEBAR,"marginBottom":"10px"
     }),
     dcc.Slider(
         id="filtro-top", min=5, max=20, step=5, value=10,
@@ -195,11 +208,12 @@ sidebar_body = html.Div([
 
     # Sección vistas
     html.Div("VISTAS", style={
-        "fontSize":"9px","fontWeight":"700","color":C_MUTED,
+        "fontSize":"9px","fontWeight":"700","color":C_MUTED_SIDEBAR,
         "letterSpacing":"1.5px","marginBottom":"14px"
     }),
     dcc.RadioItems(
         id="nav-tab",
+        className="sv-nav-tab",
         options=[
             {"label":"Catálogo",              "value":"tab-catalogo"},
             {"label":"Geografía & Idiomas",   "value":"tab-geo"},
@@ -209,20 +223,20 @@ sidebar_body = html.Div([
         value="tab-catalogo",
         labelStyle={
             "display":"block","marginBottom":"6px","fontSize":"12px",
-            "color":C_MUTED,"cursor":"pointer","padding":"6px 10px",
-            "borderRadius":"6px"
+            "color":C_MUTED_SIDEBAR,"cursor":"pointer","padding":"6px 10px",
+            "borderRadius":"8px"
         },
         inputStyle={"display":"none"},
         style={"marginBottom":"24px"}
     ),
 
     # Notas
-    html.Div(style={"borderTop":f"1px solid {C_BORDER}","marginBottom":"16px"}),
+    html.Div(style={"borderTop":"1px solid var(--border-color-sidebar)","marginBottom":"16px"}),
     html.Div("⚠ Popularidad = índice relativo TMDB.", style={
-        "fontSize":"10px","color":C_MUTED,"lineHeight":"1.5","marginBottom":"6px"
+        "fontSize":"10px","color":C_MUTED_SIDEBAR,"lineHeight":"1.5","marginBottom":"6px"
     }),
     html.Div("ℹ 1.000 registros/año por categoría.", style={
-        "fontSize":"10px","color":C_MUTED,"lineHeight":"1.5"
+        "fontSize":"10px","color":C_MUTED_SIDEBAR,"lineHeight":"1.5"
     }),
 ], id="sidebar-body", className="sv-sidebar-body")
 
@@ -234,28 +248,35 @@ sidebar = html.Div([
     "width":"200px","minHeight":"100vh",
     "padding":"24px 16px",
     "position":"fixed","top":"0","left":"0",
-    "borderRight":f"1px solid {C_BORDER}",
+    "borderRight":"1px solid var(--border-color-sidebar)",
     "fontFamily":FONT,
     "overflowY":"auto",
 })
 
 # ── LAYOUT PRINCIPAL ─────────────────────────────────────────────
 app.layout = html.Div([
+    dcc.Store(id="theme-mode", storage_type="local", data="system"),
+    dcc.Store(id="theme-resolved", data="dark"),
+
     sidebar,
     # Contenido (margen izquierdo = ancho sidebar en desktop; sin margen en mobile, ver assets/responsive.css)
     html.Div([
         # Header
         html.Div([
-            html.Div(id="page-title", style={
-                "fontSize":"18px","fontWeight":"800","color":C_TEXT
-            }),
-            html.Div("ADY1104 · Visualización de Datos · Duoc UC 2026", style={
-                "fontSize":"11px","color":C_MUTED
-            }),
+            html.Div([
+                html.Div(id="page-title", style={
+                    "fontSize":"18px","fontWeight":"800","color":C_TEXT
+                }),
+                html.Div("ADY1104 · Visualización de Datos · Duoc UC 2026", style={
+                    "fontSize":"11px","color":C_MUTED
+                }),
+            ]),
+            html.Button("Auto", id="theme-toggle-btn", n_clicks=0, className="sv-theme-toggle"),
         ], className="sv-header", style={
             "padding":"20px 24px 16px",
             "borderBottom":f"1px solid {C_BORDER}",
-            "marginBottom":"20px"
+            "marginBottom":"20px",
+            "display":"flex","justifyContent":"space-between","alignItems":"flex-start"
         }),
 
         # KPIs
@@ -267,6 +288,45 @@ app.layout = html.Div([
     ], className="sv-main", style={"marginLeft":"200px","backgroundColor":BG_MAIN,"minHeight":"100vh","fontFamily":FONT}),
 
 ], style={"backgroundColor":BG_MAIN,"fontFamily":FONT})
+
+
+# ── TEMA (claro / oscuro / automático) ──────────────────────────
+# theme-mode: elección del usuario ("light" | "dark" | "system"), persistida en localStorage.
+# theme-resolved: valor real aplicado ("light" | "dark"); lo usan los callbacks de Python
+# para colorear los gráficos de Plotly (que no pueden leer variables CSS).
+
+app.clientside_callback(
+    """
+    function(n_clicks, mode) {
+        if (!n_clicks) { return window.dash_clientside.no_update; }
+        var order = ["system", "light", "dark"];
+        var idx = order.indexOf(mode);
+        return order[(idx + 1) % order.length];
+    }
+    """,
+    Output("theme-mode", "data"),
+    Input("theme-toggle-btn", "n_clicks"),
+    State("theme-mode", "data"),
+    prevent_initial_call=True,
+)
+
+app.clientside_callback(
+    """
+    function(mode) {
+        function resolve(m) {
+            if (m === "light" || m === "dark") { return m; }
+            return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        var resolved = resolve(mode);
+        document.documentElement.setAttribute("data-theme", resolved);
+        var labels = {system: "Auto", light: "Claro", dark: "Oscuro"};
+        return [resolved, labels[mode] || "Auto"];
+    }
+    """,
+    Output("theme-resolved", "data"),
+    Output("theme-toggle-btn", "children"),
+    Input("theme-mode", "data"),
+)
 
 
 # ── CALLBACKS ────────────────────────────────────────────────────
@@ -317,7 +377,7 @@ def update_kpis(tipo, years):
     val_avg  = df["vote_average"].mean()
 
     kpis = [
-        ("Total Contenidos",   f"{total:,}",       "catálogo completo",        C_ACCENT1),
+        ("Total Contenidos",   f"{total:,}",       "catálogo completo",        C_ACCENT_PRIMARY),
         ("Películas",          f"{pel:,}",          f"{pel/total*100:.0f}% del total", C_MOVIE),
         ("Series",             f"{ser:,}",          f"{ser/total*100:.0f}% del total", C_SHOW),
         ("Países",             f"{paises}",          "países productores",       C_ACCENT4),
@@ -340,9 +400,15 @@ def update_kpis(tipo, years):
     Input("filtro-tipo","value"),
     Input("filtro-years","value"),
     Input("filtro-top","value"),
+    Input("theme-resolved","data"),
 )
-def render_tab(tab, tipo, years, top_n):
+def render_tab(tab, tipo, years, top_n, theme):
     df = filtrar(tipo, years)
+
+    # Colores de gráfico según el tema resuelto (claro/oscuro) — Plotly
+    # necesita valores hex literales, no puede leer variables CSS.
+    tc = CHART_THEMES.get(theme, CHART_THEMES["dark"])
+    BG_CHART, C_TEXT, C_MUTED, C_BORDER = tc["bg"], tc["text"], tc["muted"], tc["border"]
 
     # ══ CATÁLOGO ══════════════════════════════════════════════════
     if tab == "tab-catalogo":
@@ -368,7 +434,7 @@ def render_tab(tab, tipo, years, top_n):
             textfont=dict(color=C_TEXT, size=11),
             hovertemplate="%{y}: %{x:,}<extra></extra>",
         ))
-        lay = base_layout("¿Cómo se distribuye el catálogo?")
+        lay = base_layout("¿Cómo se distribuye el catálogo?", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay["xaxis"]["title"] = "Cantidad de títulos"
         lay["yaxis"]["title"] = ""
         lay["xaxis"]["showgrid"] = False
@@ -398,7 +464,7 @@ def render_tab(tab, tipo, years, top_n):
             textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:,} contenidos<extra></extra>",
         ))
-        lay2 = base_layout(f"Top {top_n} géneros — ¿Cuáles dominan el catálogo?")
+        lay2 = base_layout(f"Top {top_n} géneros — ¿Cuáles dominan el catálogo?", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay2["xaxis"]["title"] = "Cantidad de contenidos"
         lay2["yaxis"]["title"] = ""
         lay2["xaxis"]["showgrid"] = False
@@ -415,7 +481,7 @@ def render_tab(tab, tipo, years, top_n):
                 marker=dict(color=color, opacity=0.85, line=dict(color="rgba(0,0,0,0)")),
                 hovertemplate=f"{tipo_val} — %{{x}}: %{{y:,}}<extra></extra>",
             ))
-        lay3 = base_layout("Distribución de calificaciones (0–10)")
+        lay3 = base_layout("Distribución de calificaciones (0–10)", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay3["xaxis"]["title"] = "Rango de calificación"
         lay3["yaxis"]["title"] = "Cantidad de contenidos"
         lay3["barmode"] = "group"
@@ -455,7 +521,7 @@ def render_tab(tab, tipo, years, top_n):
             textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:,} títulos<extra></extra>",
         ))
-        lay_p = base_layout(f"Top {top_n} países productores")
+        lay_p = base_layout(f"Top {top_n} países productores", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_p["xaxis"]["title"] = "Cantidad de títulos"
         lay_p["yaxis"]["title"] = ""
         lay_p["xaxis"]["showgrid"] = False
@@ -479,7 +545,7 @@ def render_tab(tab, tipo, years, top_n):
             textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:,} contenidos<extra></extra>",
         ))
-        lay_l = base_layout(f"Top {top_n} idiomas disponibles")
+        lay_l = base_layout(f"Top {top_n} idiomas disponibles", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_l["xaxis"]["title"] = "Cantidad de contenidos"
         lay_l["yaxis"]["title"] = ""
         lay_l["xaxis"]["showgrid"] = False
@@ -535,7 +601,7 @@ def render_tab(tab, tipo, years, top_n):
         fig_sc.add_vline(x=med_pop, line_dash="dot", line_color=C_MUTED, opacity=0.5,
                          annotation_text=f"Med. pop. {med_pop:.0f}",
                          annotation_font=dict(size=9, color=C_MUTED))
-        lay_sc = base_layout("¿Los más populares son los mejor valorados?")
+        lay_sc = base_layout("¿Los más populares son los mejor valorados?", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_sc["xaxis"]["title"] = "Popularidad (TMDB)"
         lay_sc["yaxis"]["title"] = "Calificación (0–10)"
         lay_sc["yaxis"]["range"] = [0, 10.5]
@@ -555,7 +621,7 @@ def render_tab(tab, tipo, years, top_n):
                 marker=dict(color=color, opacity=0.85, line=dict(color="rgba(0,0,0,0)")),
                 hovertemplate="%{y}<br>Popularidad: %{x:.1f}<extra></extra>",
             ))
-        lay_pop = base_layout(f"Top {top_n} más populares")
+        lay_pop = base_layout(f"Top {top_n} más populares", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_pop["xaxis"]["title"] = "Índice de popularidad"
         lay_pop["yaxis"]["title"] = ""
         lay_pop["barmode"] = "stack"
@@ -586,7 +652,7 @@ def render_tab(tab, tipo, years, top_n):
             textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:.1f}<extra></extra>",
         ))
-        lay_pg = base_layout(f"Top {top_n} géneros por popularidad promedio")
+        lay_pg = base_layout(f"Top {top_n} géneros por popularidad promedio", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_pg["xaxis"]["title"] = "Popularidad promedio (TMDB)"
         lay_pg["yaxis"]["title"] = ""
         lay_pg["xaxis"]["showgrid"] = False
@@ -636,7 +702,7 @@ def render_tab(tab, tipo, years, top_n):
         if len(fig_ev.data) > 1:
             fig_ev.data[1].fillcolor = "rgba(6,182,212,0.08)"
 
-        lay_ev = base_layout("Incorporación de contenidos al catálogo por año")
+        lay_ev = base_layout("Incorporación de contenidos al catálogo por año", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_ev["xaxis"]["title"] = "Año de incorporación"
         lay_ev["yaxis"]["title"] = "Contenidos incorporados"
         lay_ev["xaxis"]["dtick"] = 2
@@ -661,7 +727,7 @@ def render_tab(tab, tipo, years, top_n):
         if len(fig_rel.data) > 1:
             fig_rel.data[1].fillcolor = "rgba(6,182,212,0.08)"
 
-        lay_rel = base_layout("Año de producción de los contenidos (desde 1990)")
+        lay_rel = base_layout("Año de producción de los contenidos (desde 1990)", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_rel["xaxis"]["title"] = "Año de estreno"
         lay_rel["yaxis"]["title"] = "Cantidad de contenidos"
         fig_rel.update_layout(**lay_rel)
