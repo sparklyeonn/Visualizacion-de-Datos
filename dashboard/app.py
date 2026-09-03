@@ -366,7 +366,7 @@ def render_tab(tab, tipo, years, top_n):
             orientation="h",
             marker=dict(
                 color=top_g["Cantidad"],
-                colorscale=[[0, C_ACCENT1+"55"],[1, C_ACCENT1]],
+                colorscale=[[0, "rgba(124,58,237,0.35)"],[1, C_ACCENT1]],
                 showscale=False,
                 line=dict(color="rgba(0,0,0,0)")
             ),
@@ -423,7 +423,7 @@ def render_tab(tab, tipo, years, top_n):
             x=top_p["Cantidad"], y=top_p["País"], orientation="h",
             marker=dict(
                 color=top_p["Cantidad"],
-                colorscale=[[0, C_ACCENT2+"44"],[1, C_ACCENT2]],
+                colorscale=[[0, "rgba(6,182,212,0.3)"],[1, C_ACCENT2]],
                 showscale=False,
                 line=dict(color="rgba(0,0,0,0)")
             ),
@@ -447,7 +447,7 @@ def render_tab(tab, tipo, years, top_n):
             x=lang_s["Cantidad"], y=lang_s["Idioma"], orientation="h",
             marker=dict(
                 color=lang_s["Cantidad"],
-                colorscale=[[0, C_ACCENT3+"44"],[1, C_ACCENT3]],
+                colorscale=[[0, "rgba(244,114,182,0.3)"],[1, C_ACCENT3]],
                 showscale=False,
                 line=dict(color="rgba(0,0,0,0)")
             ),
@@ -554,7 +554,7 @@ def render_tab(tab, tipo, years, top_n):
             orientation="h",
             marker=dict(
                 color=top_pg["Popularidad promedio"],
-                colorscale=[[0,C_ACCENT4+"44"],[1,C_ACCENT4]],
+                colorscale=[[0,"rgba(16,185,129,0.3)"],[1,C_ACCENT4]],
                 showscale=False,
                 line=dict(color="rgba(0,0,0,0)")
             ),
