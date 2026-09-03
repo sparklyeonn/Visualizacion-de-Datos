@@ -222,7 +222,7 @@ sidebar = html.Div([
     html.Div("ℹ 1.000 registros/año por categoría.", style={
         "fontSize":"10px","color":C_MUTED,"lineHeight":"1.5"
     }),
-], style={
+], className="sv-sidebar", style={
     "backgroundColor": BG_SIDEBAR,
     "width":"200px","minHeight":"100vh",
     "padding":"24px 16px",
@@ -235,7 +235,7 @@ sidebar = html.Div([
 # ── LAYOUT PRINCIPAL ─────────────────────────────────────────────
 app.layout = html.Div([
     sidebar,
-    # Contenido (margen izquierdo = ancho sidebar)
+    # Contenido (margen izquierdo = ancho sidebar en desktop; sin margen en mobile, ver assets/responsive.css)
     html.Div([
         # Header
         html.Div([
@@ -245,19 +245,19 @@ app.layout = html.Div([
             html.Div("ADY1104 · Visualización de Datos · Duoc UC 2026", style={
                 "fontSize":"11px","color":C_MUTED
             }),
-        ], style={
+        ], className="sv-header", style={
             "padding":"20px 24px 16px",
             "borderBottom":f"1px solid {C_BORDER}",
             "marginBottom":"20px"
         }),
 
         # KPIs
-        html.Div(id="kpi-row", style={"padding":"0 24px","marginBottom":"20px"}),
+        html.Div(id="kpi-row", className="sv-kpi-row", style={"padding":"0 24px","marginBottom":"20px"}),
 
         # Contenido dinámico
-        html.Div(id="tab-content", style={"padding":"0 24px 32px"}),
+        html.Div(id="tab-content", className="sv-tab-content", style={"padding":"0 24px 32px"}),
 
-    ], style={"marginLeft":"200px","backgroundColor":BG_MAIN,"minHeight":"100vh","fontFamily":FONT}),
+    ], className="sv-main", style={"marginLeft":"200px","backgroundColor":BG_MAIN,"minHeight":"100vh","fontFamily":FONT}),
 
 ], style={"backgroundColor":BG_MAIN,"fontFamily":FONT})
 
@@ -306,7 +306,7 @@ def update_kpis(tipo, years):
     cols = []
     for label, val, sub, color in kpis:
         cols.append(
-            dbc.Col(kpi_card(label, val, sub, color), style={"marginBottom":"0"})
+            dbc.Col(kpi_card(label, val, sub, color), xs=6, sm=4, md=3, style={"marginBottom":"0"})
         )
     return dbc.Row(cols, className="g-2")
 
@@ -400,13 +400,13 @@ def render_tab(tab, tipo, years, top_n):
 
         return html.Div([
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_tipo, config={"displayModeBar":False},
-                             style={"height":"220px"}), padding="16px"), width=4),
-                dbc.Col(card(dcc.Graph(figure=fig_rat,  config={"displayModeBar":False},
-                             style={"height":"220px"}), padding="16px"), width=8),
+                dbc.Col(card(dcc.Graph(figure=fig_tipo, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"220px"}), padding="16px"), xs=12, lg=4),
+                dbc.Col(card(dcc.Graph(figure=fig_rat,  config={"displayModeBar":False,"responsive":True},
+                             style={"height":"220px"}), padding="16px"), xs=12, lg=8),
             ], className="g-3 mb-3"),
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_gen, config={"displayModeBar":False},
+                dbc.Col(card(dcc.Graph(figure=fig_gen, config={"displayModeBar":False,"responsive":True},
                              style={"height":"320px"}), padding="16px"), width=12),
             ]),
         ])
@@ -470,10 +470,10 @@ def render_tab(tab, tipo, years, top_n):
 
         return html.Div([
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_paises, config={"displayModeBar":False},
-                             style={"height":"360px"}), padding="16px"), width=7),
-                dbc.Col(card(dcc.Graph(figure=fig_lang,   config={"displayModeBar":False},
-                             style={"height":"360px"}), padding="16px"), width=5),
+                dbc.Col(card(dcc.Graph(figure=fig_paises, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"360px"}), padding="16px"), xs=12, lg=7),
+                dbc.Col(card(dcc.Graph(figure=fig_lang,   config={"displayModeBar":False,"responsive":True},
+                             style={"height":"360px"}), padding="16px"), xs=12, lg=5),
             ], className="g-3"),
             nota,
         ])
@@ -579,13 +579,13 @@ def render_tab(tab, tipo, years, top_n):
 
         return html.Div([
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_sc, config={"displayModeBar":False},
-                             style={"height":"320px"}), padding="16px"), width=7),
-                dbc.Col(card(dcc.Graph(figure=fig_pop, config={"displayModeBar":False},
-                             style={"height":"320px"}), padding="16px"), width=5),
+                dbc.Col(card(dcc.Graph(figure=fig_sc, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"320px"}), padding="16px"), xs=12, lg=7),
+                dbc.Col(card(dcc.Graph(figure=fig_pop, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"320px"}), padding="16px"), xs=12, lg=5),
             ], className="g-3 mb-3"),
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_pg, config={"displayModeBar":False},
+                dbc.Col(card(dcc.Graph(figure=fig_pg, config={"displayModeBar":False,"responsive":True},
                              style={"height":"280px"}), padding="16px"), width=12),
             ]),
             nota_pop,
@@ -651,10 +651,10 @@ def render_tab(tab, tipo, years, top_n):
 
         return html.Div([
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_ev,  config={"displayModeBar":False},
-                             style={"height":"300px"}), padding="16px"), width=6),
-                dbc.Col(card(dcc.Graph(figure=fig_rel, config={"displayModeBar":False},
-                             style={"height":"300px"}), padding="16px"), width=6),
+                dbc.Col(card(dcc.Graph(figure=fig_ev,  config={"displayModeBar":False,"responsive":True},
+                             style={"height":"300px"}), padding="16px"), xs=12, lg=6),
+                dbc.Col(card(dcc.Graph(figure=fig_rel, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"300px"}), padding="16px"), xs=12, lg=6),
             ], className="g-3"),
             nota_t,
         ])

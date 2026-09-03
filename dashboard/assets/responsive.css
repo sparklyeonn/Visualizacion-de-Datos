@@ -1,0 +1,30 @@
+/* StreamView Analytics — breakpoints responsivos
+   Desktop (>=992px): sidebar fija a la izquierda, tal como el diseño original.
+   Tablet y móvil (<992px): sidebar pasa a ser un bloque normal arriba del
+   contenido (deja de estar "fixed"), y el contenido pierde el margen
+   izquierdo que le dejaba espacio a la sidebar fija. */
+
+@media (max-width: 991.98px) {
+  .sv-sidebar {
+    position: static !important;
+    width: 100% !important;
+    min-height: auto !important;
+    border-right: none !important;
+    border-bottom: 1px solid #2D3148;
+  }
+  .sv-main {
+    margin-left: 0 !important;
+  }
+}
+
+/* Móvil: reduce paddings y compacta el header para pantallas angostas */
+@media (max-width: 575.98px) {
+  .sv-header {
+    padding: 16px !important;
+  }
+  .sv-kpi-row,
+  .sv-tab-content {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+}
