@@ -138,6 +138,10 @@ server = app.server
 # ── SIDEBAR ──────────────────────────────────────────────────────
 sidebar_header = html.Div([
     html.Div([
+        html.Div("▶", style={
+            "fontSize":"22px","color":C_ACCENT1,
+            "lineHeight":"1","marginBottom":"2px"
+        }),
         html.Div("StreamView", style={
             "fontSize":"15px","fontWeight":"800","color":C_TEXT,"letterSpacing":"-0.3px"
         }),
@@ -214,10 +218,10 @@ sidebar_body = html.Div([
 
     # Notas
     html.Div(style={"borderTop":f"1px solid {C_BORDER}","marginBottom":"16px"}),
-    html.Div("Popularidad = índice relativo TMDB.", style={
+    html.Div("⚠ Popularidad = índice relativo TMDB.", style={
         "fontSize":"10px","color":C_MUTED,"lineHeight":"1.5","marginBottom":"6px"
     }),
-    html.Div("1.000 registros/año por categoría.", style={
+    html.Div("ℹ 1.000 registros/año por categoría.", style={
         "fontSize":"10px","color":C_MUTED,"lineHeight":"1.5"
     }),
 ], id="sidebar-body", className="sv-sidebar-body")
@@ -483,7 +487,7 @@ def render_tab(tab, tipo, years, top_n):
         fig_lang.update_layout(**lay_l, xaxis_range=[0, lang_s["Cantidad"].max()*1.18])
 
         nota = html.Div(
-            "Un contenido con coproducción se contabiliza en cada país participante.",
+            "ℹ Un contenido con coproducción se contabiliza en cada país participante.",
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )
 
@@ -591,7 +595,7 @@ def render_tab(tab, tipo, years, top_n):
                              xaxis_range=[0, top_pg["Popularidad promedio"].max()*1.18])
 
         nota_pop = html.Div(
-            "Popularidad = índice relativo TMDB. No equivale a reproducciones. "
+            "⚠ Popularidad = índice relativo TMDB. No equivale a reproducciones. "
             "Scatter excluye el 5% extremo de popularidad.",
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )
@@ -663,7 +667,7 @@ def render_tab(tab, tipo, years, top_n):
         fig_rel.update_layout(**lay_rel)
 
         nota_t = html.Div(
-            "Dataset muestreado: 1.000 registros/año por categoría → "
+            "ℹ Dataset muestreado: 1.000 registros/año por categoría → "
             "la distribución temporal uniforme es por diseño, no refleja el ritmo real de incorporación.",
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )
