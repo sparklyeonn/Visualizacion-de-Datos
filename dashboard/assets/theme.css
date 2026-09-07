@@ -19,7 +19,7 @@
 
 [data-theme="light"] {
   --bg-page: #F3F5FA;
-  --bg-sidebar: #2563EB;
+  --bg-sidebar: #3B0764;
   --bg-card: #FFFFFF;
   --text-primary: #0F172A;
   --text-on-sidebar: #FFFFFF;
@@ -27,7 +27,7 @@
   --text-muted-on-sidebar: rgba(255,255,255,0.75);
   --border-color: #E5E9F2;
   --border-color-sidebar: rgba(255,255,255,0.22);
-  --accent-primary: #2563EB;
+  --accent-primary: #7C3AED;
   --shadow-card: 0 1px 2px rgba(15,23,42,0.06), 0 6px 16px rgba(15,23,42,0.06);
 }
 
