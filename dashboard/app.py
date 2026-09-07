@@ -50,23 +50,6 @@ LANG_MAP = {
     "tl":"Filipino","ar":"Árabe","pt":"Portugués","nl":"Holandés","tr":"Turco"
 }
 
-COUNTRY_ISO = {
-    "United States": "USA", "United Kingdom": "GBR", "France": "FRA",
-    "Japan": "JPN", "South Korea": "KOR", "India": "IND", "Germany": "DEU",
-    "Canada": "CAN", "Spain": "ESP", "Italy": "ITA", "Mexico": "MEX",
-    "Australia": "AUS", "Brazil": "BRA", "China": "CHN", "Argentina": "ARG",
-    "Denmark": "DNK", "Sweden": "SWE", "Norway": "NOR", "Netherlands": "NLD",
-    "Belgium": "BEL", "Switzerland": "CHE", "Austria": "AUT", "Poland": "POL",
-    "Russia": "RUS", "Turkey": "TUR", "Israel": "ISR", "Thailand": "THA",
-    "Hong Kong": "HKG", "Taiwan": "TWN", "Philippines": "PHL",
-    "Indonesia": "IDN", "Malaysia": "MYS", "Singapore": "SGP",
-    "Nigeria": "NGA", "South Africa": "ZAF", "Egypt": "EGY",
-    "Colombia": "COL", "Chile": "CHL", "Peru": "PER", "Venezuela": "VEN",
-    "Portugal": "PRT", "Greece": "GRC", "Czech Republic": "CZE",
-    "Hungary": "HUN", "Romania": "ROU", "New Zealand": "NZL",
-    "Ireland": "IRL", "Finland": "FIN", "Iceland": "ISL",
-}
-
 # ── CARGA ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -509,86 +492,6 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay3["barmode"] = "group"
         fig_rat.update_layout(**lay3)
 
-        # Análisis financiero (solo películas con budget y revenue válidos)
-        movies_fin = movies[
-            (pd.to_numeric(movies["year_added"], errors="coerce") >= int(years[0])) &
-            (pd.to_numeric(movies["year_added"], errors="coerce") <= int(years[1])) &
-            (movies["budget"] > 0) & (movies["revenue"] > 0)
-        ].copy()
-
-        top_rev = movies_fin.nlargest(top_n, "revenue")[["title","budget","revenue","vote_average"]].copy()
-        top_rev["revenue_m"] = top_rev["revenue"] / 1_000_000
-        top_rev = top_rev.sort_values("revenue_m")
-
-        fig_rev = go.Figure(go.Bar(
-            x=top_rev["revenue_m"], y=top_rev["title"].str[:25],
-            orientation="h",
-            marker=dict(
-                color=top_rev["revenue_m"],
-                colorscale=[[0, "rgba(124,58,237,0.35)"],[1, C_MOVIE]],
-                showscale=False,
-                line=dict(color="rgba(0,0,0,0)")
-            ),
-            text=top_rev["revenue_m"].apply(lambda x: f"${x:,.0f}m"),
-            textposition="outside",
-            textfont=dict(color=C_TEXT, size=10),
-            hovertemplate="%{y}: $%{x:,.0f}m<extra></extra>",
-        ))
-        lay_rev = base_layout(f"Top {top_n} películas por ingresos (USD)", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
-        lay_rev["xaxis"]["title"] = "Ingresos (millones USD)"
-        lay_rev["yaxis"]["title"] = ""
-        lay_rev["xaxis"]["showgrid"] = False
-        lay_rev["margin"] = dict(l=8, r=60, t=44, b=8)
-        rev_max = top_rev["revenue_m"].max() if len(top_rev) else 1
-        fig_rev.update_layout(**lay_rev, xaxis_range=[0, rev_max*1.18])
-
-        # Presupuesto vs ingresos
-        sc_fin = movies_fin.copy()
-        sc_fin["budget_m"] = sc_fin["budget"] / 1_000_000
-        sc_fin["revenue_m"] = sc_fin["revenue"] / 1_000_000
-        size_norm_fin = ((sc_fin["vote_average"].fillna(0) / 10) * 8 + 6).clip(6, 14)
-
-        fig_fin_sc = go.Figure()
-        fig_fin_sc.add_trace(go.Scatter(
-            x=sc_fin["budget_m"], y=sc_fin["revenue_m"],
-            mode="markers",
-            marker=dict(color=C_MOVIE, size=size_norm_fin, opacity=0.6,
-                        line=dict(color="rgba(0,0,0,0)")),
-            text=sc_fin["title"],
-            customdata=sc_fin[["budget","revenue","vote_average"]].values,
-            hovertemplate=(
-                "<b>%{text}</b><br>"
-                "Presupuesto: $%{customdata[0]:,.0f}<br>"
-                "Ingresos: $%{customdata[1]:,.0f}<br>"
-                "Calificación: %{customdata[2]:.2f}/10<extra></extra>"
-            ),
-            showlegend=False,
-        ))
-        if len(sc_fin) > 0:
-            max_val = float(max(sc_fin["budget_m"].max(), sc_fin["revenue_m"].max()))
-            fig_fin_sc.add_trace(go.Scatter(
-                x=[0, max_val], y=[0, max_val],
-                mode="lines",
-                line=dict(dash="dot", color=C_MUTED),
-                opacity=0.4,
-                showlegend=False,
-                hoverinfo="skip",
-            ))
-            fig_fin_sc.add_annotation(
-                x=max_val, y=max_val, text="Break-even",
-                showarrow=False, font=dict(size=9, color=C_MUTED),
-                xanchor="left", yanchor="bottom",
-            )
-        lay_fin_sc = base_layout("¿A mayor presupuesto, mayores ingresos?", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
-        lay_fin_sc["xaxis"]["title"] = "Presupuesto (millones USD)"
-        lay_fin_sc["yaxis"]["title"] = "Ingresos (millones USD)"
-        fig_fin_sc.update_layout(**lay_fin_sc)
-
-        nota_fin = html.Div(
-            "⚠ budget y revenue disponibles solo para películas con budget > 0 y revenue > 0. Las series no tienen estos datos.",
-            style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
-        )
-
         return html.Div([
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_tipo, config={"displayModeBar":False,"responsive":True},
@@ -599,48 +502,11 @@ def render_tab(tab, tipo, years, top_n, theme):
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_gen, config={"displayModeBar":False,"responsive":True},
                              style={"height":"320px"}), padding="16px"), width=12),
-            ], className="mb-3"),
-            dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_rev, config={"displayModeBar":False,"responsive":True},
-                             style={"height":"280px"}), padding="16px"), xs=12, lg=6),
-                dbc.Col(card(dcc.Graph(figure=fig_fin_sc, config={"displayModeBar":False,"responsive":True},
-                             style={"height":"280px"}), padding="16px"), xs=12, lg=6),
-            ], className="g-3 mb-3"),
-            nota_fin,
+            ]),
         ])
 
     # ══ GEOGRAFÍA ═════════════════════════════════════════════════
     elif tab == "tab-geo":
-
-        # Mapa mundial de origen del contenido
-        paises_all = df["country"].dropna().str.split(", ").explode().str.strip()
-        paises_count = paises_all.value_counts().reset_index()
-        paises_count.columns = ["País", "Cantidad"]
-        paises_count["iso"] = paises_count["País"].map(COUNTRY_ISO)
-        paises_map = paises_count.dropna(subset=["iso"])
-
-        fig_map = go.Figure(go.Choropleth(
-            locations=paises_map["iso"],
-            z=paises_map["Cantidad"],
-            text=paises_map["País"],
-            colorscale=[[0, "rgba(124,58,237,0.1)"], [0.5, C_ACCENT1], [1, C_MOVIE]],
-            showscale=True,
-            marker_line_color=C_BORDER,
-            colorbar=dict(tickfont=dict(color=C_MUTED, size=9), len=0.7),
-            hovertemplate="<b>%{text}</b>: %{z:,} contenidos<extra></extra>",
-        ))
-        lay_map = base_layout("¿Desde dónde viene el contenido del catálogo?", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
-        lay_map["geo"] = dict(
-            showframe=False, showcoastlines=True, coastlinecolor=C_BORDER,
-            bgcolor=BG_CHART, landcolor=BG_CHART, showland=True,
-            projection=dict(type="natural earth"),
-        )
-        fig_map.update_layout(**lay_map)
-
-        nota_map = html.Div(
-            "ℹ Solo se muestran países con código ISO reconocido. Un contenido con coproducción se contabiliza en cada país.",
-            style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
-        )
 
         paises_s = df["country"].dropna().str.split(", ").explode()
         top_p = paises_s.value_counts().head(top_n).reset_index()
@@ -698,16 +564,11 @@ def render_tab(tab, tipo, years, top_n, theme):
 
         return html.Div([
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_map, config={"displayModeBar":False,"responsive":True},
-                             style={"height":"320px"}), padding="16px"), width=12),
-            ], className="g-3 mb-3"),
-            dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_paises, config={"displayModeBar":False,"responsive":True},
                              style={"height":"360px"}), padding="16px"), xs=12, lg=7),
                 dbc.Col(card(dcc.Graph(figure=fig_lang,   config={"displayModeBar":False,"responsive":True},
                              style={"height":"360px"}), padding="16px"), xs=12, lg=5),
             ], className="g-3"),
-            nota_map,
             nota,
         ])
 
@@ -751,10 +612,14 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay_sc["yaxis"]["range"] = [0, 10.5]
         fig_sc.update_layout(**lay_sc)
 
-        # Top popularidad
-        top_pop = df[df["vote_average"]>0].nlargest(top_n,"popularity")[
+        # Top popularidad por formato (top_n películas + top_n series, no un ranking mixto)
+        top_pop_movies = df[(df["vote_average"]>0) & (df["type_label"]=="Película")].nlargest(top_n,"popularity")[
             ["title","popularity","vote_average","type_label"]
         ]
+        top_pop_shows = df[(df["vote_average"]>0) & (df["type_label"]=="Serie")].nlargest(top_n,"popularity")[
+            ["title","popularity","vote_average","type_label"]
+        ]
+        top_pop = pd.concat([top_pop_movies, top_pop_shows], ignore_index=True)
         fig_pop = go.Figure()
         for tipo_val, color in [("Película",C_MOVIE),("Serie",C_SHOW)]:
             d = top_pop[top_pop["type_label"]==tipo_val].sort_values("popularity")
@@ -765,7 +630,7 @@ def render_tab(tab, tipo, years, top_n, theme):
                 marker=dict(color=color, opacity=0.85, line=dict(color="rgba(0,0,0,0)")),
                 hovertemplate="%{y}<br>Popularidad: %{x:.1f}<extra></extra>",
             ))
-        lay_pop = base_layout(f"Top {top_n} más populares", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        lay_pop = base_layout(f"Top {top_n} más populares por formato", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_pop["xaxis"]["title"] = "Índice de popularidad"
         lay_pop["yaxis"]["title"] = ""
         lay_pop["barmode"] = "stack"
