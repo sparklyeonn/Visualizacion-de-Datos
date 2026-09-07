@@ -50,6 +50,23 @@ LANG_MAP = {
     "tl":"Filipino","ar":"Árabe","pt":"Portugués","nl":"Holandés","tr":"Turco"
 }
 
+COUNTRY_ISO = {
+    "United States": "USA", "United Kingdom": "GBR", "France": "FRA",
+    "Japan": "JPN", "South Korea": "KOR", "India": "IND", "Germany": "DEU",
+    "Canada": "CAN", "Spain": "ESP", "Italy": "ITA", "Mexico": "MEX",
+    "Australia": "AUS", "Brazil": "BRA", "China": "CHN", "Argentina": "ARG",
+    "Denmark": "DNK", "Sweden": "SWE", "Norway": "NOR", "Netherlands": "NLD",
+    "Belgium": "BEL", "Switzerland": "CHE", "Austria": "AUT", "Poland": "POL",
+    "Russia": "RUS", "Turkey": "TUR", "Israel": "ISR", "Thailand": "THA",
+    "Hong Kong": "HKG", "Taiwan": "TWN", "Philippines": "PHL",
+    "Indonesia": "IDN", "Malaysia": "MYS", "Singapore": "SGP",
+    "Nigeria": "NGA", "South Africa": "ZAF", "Egypt": "EGY",
+    "Colombia": "COL", "Chile": "CHL", "Peru": "PER", "Venezuela": "VEN",
+    "Portugal": "PRT", "Greece": "GRC", "Czech Republic": "CZE",
+    "Hungary": "HUN", "Romania": "ROU", "New Zealand": "NZL",
+    "Ireland": "IRL", "Finland": "FIN", "Iceland": "ISL",
+}
+
 # ── CARGA ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
@@ -80,10 +97,15 @@ YEAR_MAX = int(combined["year_added"].max())
 # ── HELPERS ──────────────────────────────────────────────────────
 def filtrar(tipo="Todos", year_range=None):
     df = combined.copy()
-    if tipo != "Todos":
+    if tipo and tipo != "Todos":
         df = df[df["type_label"] == tipo]
     if year_range:
-        df = df[(df["year_added"] >= year_range[0]) & (df["year_added"] <= year_range[1])]
+        y0 = int(year_range[0])
+        y1 = int(year_range[1])
+        df = df[
+            (pd.to_numeric(df["year_added"], errors="coerce") >= y0) &
+            (pd.to_numeric(df["year_added"], errors="coerce") <= y1)
+        ]
     return df
 
 def base_layout(title="", bg="#1A1D27", text="#E2E8F0", muted="#64748B", border="#2D3148"):
@@ -487,6 +509,86 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay3["barmode"] = "group"
         fig_rat.update_layout(**lay3)
 
+        # Análisis financiero (solo películas con budget y revenue válidos)
+        movies_fin = movies[
+            (pd.to_numeric(movies["year_added"], errors="coerce") >= int(years[0])) &
+            (pd.to_numeric(movies["year_added"], errors="coerce") <= int(years[1])) &
+            (movies["budget"] > 0) & (movies["revenue"] > 0)
+        ].copy()
+
+        top_rev = movies_fin.nlargest(top_n, "revenue")[["title","budget","revenue","vote_average"]].copy()
+        top_rev["revenue_m"] = top_rev["revenue"] / 1_000_000
+        top_rev = top_rev.sort_values("revenue_m")
+
+        fig_rev = go.Figure(go.Bar(
+            x=top_rev["revenue_m"], y=top_rev["title"].str[:25],
+            orientation="h",
+            marker=dict(
+                color=top_rev["revenue_m"],
+                colorscale=[[0, "rgba(124,58,237,0.35)"],[1, C_MOVIE]],
+                showscale=False,
+                line=dict(color="rgba(0,0,0,0)")
+            ),
+            text=top_rev["revenue_m"].apply(lambda x: f"${x:,.0f}m"),
+            textposition="outside",
+            textfont=dict(color=C_TEXT, size=10),
+            hovertemplate="%{y}: $%{x:,.0f}m<extra></extra>",
+        ))
+        lay_rev = base_layout(f"Top {top_n} películas por ingresos (USD)", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        lay_rev["xaxis"]["title"] = "Ingresos (millones USD)"
+        lay_rev["yaxis"]["title"] = ""
+        lay_rev["xaxis"]["showgrid"] = False
+        lay_rev["margin"] = dict(l=8, r=60, t=44, b=8)
+        rev_max = top_rev["revenue_m"].max() if len(top_rev) else 1
+        fig_rev.update_layout(**lay_rev, xaxis_range=[0, rev_max*1.18])
+
+        # Presupuesto vs ingresos
+        sc_fin = movies_fin.copy()
+        sc_fin["budget_m"] = sc_fin["budget"] / 1_000_000
+        sc_fin["revenue_m"] = sc_fin["revenue"] / 1_000_000
+        size_norm_fin = ((sc_fin["vote_average"].fillna(0) / 10) * 8 + 6).clip(6, 14)
+
+        fig_fin_sc = go.Figure()
+        fig_fin_sc.add_trace(go.Scatter(
+            x=sc_fin["budget_m"], y=sc_fin["revenue_m"],
+            mode="markers",
+            marker=dict(color=C_MOVIE, size=size_norm_fin, opacity=0.6,
+                        line=dict(color="rgba(0,0,0,0)")),
+            text=sc_fin["title"],
+            customdata=sc_fin[["budget","revenue","vote_average"]].values,
+            hovertemplate=(
+                "<b>%{text}</b><br>"
+                "Presupuesto: $%{customdata[0]:,.0f}<br>"
+                "Ingresos: $%{customdata[1]:,.0f}<br>"
+                "Calificación: %{customdata[2]:.2f}/10<extra></extra>"
+            ),
+            showlegend=False,
+        ))
+        if len(sc_fin) > 0:
+            max_val = float(max(sc_fin["budget_m"].max(), sc_fin["revenue_m"].max()))
+            fig_fin_sc.add_trace(go.Scatter(
+                x=[0, max_val], y=[0, max_val],
+                mode="lines",
+                line=dict(dash="dot", color=C_MUTED),
+                opacity=0.4,
+                showlegend=False,
+                hoverinfo="skip",
+            ))
+            fig_fin_sc.add_annotation(
+                x=max_val, y=max_val, text="Break-even",
+                showarrow=False, font=dict(size=9, color=C_MUTED),
+                xanchor="left", yanchor="bottom",
+            )
+        lay_fin_sc = base_layout("¿A mayor presupuesto, mayores ingresos?", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        lay_fin_sc["xaxis"]["title"] = "Presupuesto (millones USD)"
+        lay_fin_sc["yaxis"]["title"] = "Ingresos (millones USD)"
+        fig_fin_sc.update_layout(**lay_fin_sc)
+
+        nota_fin = html.Div(
+            "⚠ budget y revenue disponibles solo para películas con budget > 0 y revenue > 0. Las series no tienen estos datos.",
+            style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
+        )
+
         return html.Div([
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_tipo, config={"displayModeBar":False,"responsive":True},
@@ -497,11 +599,48 @@ def render_tab(tab, tipo, years, top_n, theme):
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_gen, config={"displayModeBar":False,"responsive":True},
                              style={"height":"320px"}), padding="16px"), width=12),
-            ]),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col(card(dcc.Graph(figure=fig_rev, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"280px"}), padding="16px"), xs=12, lg=6),
+                dbc.Col(card(dcc.Graph(figure=fig_fin_sc, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"280px"}), padding="16px"), xs=12, lg=6),
+            ], className="g-3 mb-3"),
+            nota_fin,
         ])
 
     # ══ GEOGRAFÍA ═════════════════════════════════════════════════
     elif tab == "tab-geo":
+
+        # Mapa mundial de origen del contenido
+        paises_all = df["country"].dropna().str.split(", ").explode().str.strip()
+        paises_count = paises_all.value_counts().reset_index()
+        paises_count.columns = ["País", "Cantidad"]
+        paises_count["iso"] = paises_count["País"].map(COUNTRY_ISO)
+        paises_map = paises_count.dropna(subset=["iso"])
+
+        fig_map = go.Figure(go.Choropleth(
+            locations=paises_map["iso"],
+            z=paises_map["Cantidad"],
+            text=paises_map["País"],
+            colorscale=[[0, "rgba(124,58,237,0.1)"], [0.5, C_ACCENT1], [1, C_MOVIE]],
+            showscale=True,
+            marker_line_color=C_BORDER,
+            colorbar=dict(tickfont=dict(color=C_MUTED, size=9), len=0.7),
+            hovertemplate="<b>%{text}</b>: %{z:,} contenidos<extra></extra>",
+        ))
+        lay_map = base_layout("¿Desde dónde viene el contenido del catálogo?", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        lay_map["geo"] = dict(
+            showframe=False, showcoastlines=True, coastlinecolor=C_BORDER,
+            bgcolor=BG_CHART, landcolor=BG_CHART, showland=True,
+            projection=dict(type="natural earth"),
+        )
+        fig_map.update_layout(**lay_map)
+
+        nota_map = html.Div(
+            "ℹ Solo se muestran países con código ISO reconocido. Un contenido con coproducción se contabiliza en cada país.",
+            style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
+        )
 
         paises_s = df["country"].dropna().str.split(", ").explode()
         top_p = paises_s.value_counts().head(top_n).reset_index()
@@ -559,11 +698,16 @@ def render_tab(tab, tipo, years, top_n, theme):
 
         return html.Div([
             dbc.Row([
+                dbc.Col(card(dcc.Graph(figure=fig_map, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"320px"}), padding="16px"), width=12),
+            ], className="g-3 mb-3"),
+            dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_paises, config={"displayModeBar":False,"responsive":True},
                              style={"height":"360px"}), padding="16px"), xs=12, lg=7),
                 dbc.Col(card(dcc.Graph(figure=fig_lang,   config={"displayModeBar":False,"responsive":True},
                              style={"height":"360px"}), padding="16px"), xs=12, lg=5),
             ], className="g-3"),
+            nota_map,
             nota,
         ])
 
@@ -666,6 +810,44 @@ def render_tab(tab, tipo, years, top_n, theme):
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )
 
+        # Calificación promedio por país (mín. 30 títulos)
+        rows_cp = []
+        for _, row in df.dropna(subset=["country"]).iterrows():
+            for c in row["country"].split(", "):
+                rows_cp.append({"País": c.strip(), "vote_average": row["vote_average"]})
+        cpdf = pd.DataFrame(rows_cp)
+        country_stats = cpdf.groupby("País")["vote_average"].agg(["mean","count"]).reset_index()
+        country_stats = country_stats[country_stats["count"] >= 30]
+        top_cp = country_stats.nlargest(top_n, "mean")[["País","mean"]].copy()
+        top_cp.columns = ["País","Calificación promedio"]
+        top_cp = top_cp.sort_values("Calificación promedio")
+
+        fig_cp = go.Figure(go.Bar(
+            x=top_cp["Calificación promedio"], y=top_cp["País"],
+            orientation="h",
+            marker=dict(
+                color=top_cp["Calificación promedio"],
+                colorscale=[[0, "rgba(6,182,212,0.3)"],[1, C_ACCENT2]],
+                showscale=False,
+                line=dict(color="rgba(0,0,0,0)")
+            ),
+            text=top_cp["Calificación promedio"].round(2),
+            textposition="outside",
+            textfont=dict(color=C_TEXT, size=10),
+            hovertemplate="%{y}: %{x:.2f}<extra></extra>",
+        ))
+        lay_cp = base_layout(f"Top {top_n} países con mejor calificación promedio (mín. 30 títulos)", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        lay_cp["xaxis"]["title"] = "Calificación promedio (0–10)"
+        lay_cp["yaxis"]["title"] = ""
+        lay_cp["xaxis"]["showgrid"] = False
+        lay_cp["margin"] = dict(l=8, r=50, t=44, b=8)
+        fig_cp.update_layout(**lay_cp, xaxis_range=[0, 10.5])
+
+        nota_cp = html.Div(
+            "ℹ vote_average en escala 0–10 (TMDB). Solo países con al menos 30 contenidos en el filtro actual.",
+            style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
+        )
+
         return html.Div([
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_sc, config={"displayModeBar":False,"responsive":True},
@@ -676,8 +858,13 @@ def render_tab(tab, tipo, years, top_n, theme):
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_pg, config={"displayModeBar":False,"responsive":True},
                              style={"height":"280px"}), padding="16px"), width=12),
-            ]),
+            ], className="mb-3"),
             nota_pop,
+            dbc.Row([
+                dbc.Col(card(dcc.Graph(figure=fig_cp, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"280px"}), padding="16px"), width=12),
+            ], className="mt-3"),
+            nota_cp,
         ])
 
     # ══ EVOLUCIÓN TEMPORAL ════════════════════════════════════════
@@ -732,6 +919,27 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay_rel["yaxis"]["title"] = "Cantidad de contenidos"
         fig_rel.update_layout(**lay_rel)
 
+        # Heatmap de incorporación por año y tipo
+        heat_data = df.groupby(["type_label", "year_added"]).size().reset_index(name="Cantidad")
+        heat_pivot = heat_data.pivot(index="type_label", columns="year_added", values="Cantidad").fillna(0)
+
+        fig_heat = go.Figure(go.Heatmap(
+            z=heat_pivot.values,
+            x=heat_pivot.columns,
+            y=heat_pivot.index,
+            colorscale=[[0, BG_CHART], [0.5, "rgba(124,58,237,0.53)"], [1, C_MOVIE]],
+            showscale=False,
+            texttemplate="%{z:,}",
+            textfont=dict(size=10, color=C_TEXT),
+            hovertemplate="%{y} — %{x}: %{z:,}<extra></extra>",
+        ))
+        lay_heat = base_layout("Incorporación anual al catálogo — Películas vs. Series", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        lay_heat["xaxis"]["title"] = "Año"
+        lay_heat["yaxis"]["title"] = ""
+        lay_heat["xaxis"]["showgrid"] = False
+        lay_heat["yaxis"]["showgrid"] = False
+        fig_heat.update_layout(**lay_heat)
+
         nota_t = html.Div(
             "ℹ Dataset muestreado: 1.000 registros/año por categoría → "
             "la distribución temporal uniforme es por diseño, no refleja el ritmo real de incorporación.",
@@ -744,7 +952,11 @@ def render_tab(tab, tipo, years, top_n, theme):
                              style={"height":"300px"}), padding="16px"), xs=12, lg=6),
                 dbc.Col(card(dcc.Graph(figure=fig_rel, config={"displayModeBar":False,"responsive":True},
                              style={"height":"300px"}), padding="16px"), xs=12, lg=6),
-            ], className="g-3"),
+            ], className="g-3 mb-3"),
+            dbc.Row([
+                dbc.Col(card(dcc.Graph(figure=fig_heat, config={"displayModeBar":False,"responsive":True},
+                             style={"height":"180px"}), padding="16px"), width=12),
+            ]),
             nota_t,
         ])
 
