@@ -51,6 +51,22 @@ html {
   border-color: var(--accent-primary);
 }
 
+/* ── Números de los sliders del sidebar (Años / Ítems en rankings) ──
+   Dash no trae color propio para estas marcas: usa el gris por defecto
+   del navegador, que casi no se ve sobre el fondo de color del sidebar.
+   Se fuerza el mismo color de texto secundario que ya usan las demás
+   etiquetas del sidebar, para que sea legible en ambos temas.
+   Se cubren los dos esquemas de clases que usa Dash según su versión
+   (rc-slider-* en versiones antiguas, dash-slider-* en más recientes). */
+.sv-sidebar .rc-slider-mark-text,
+.sv-sidebar .rc-slider-mark-text-active,
+.sv-sidebar .dash-slider-mark {
+  color: var(--text-muted-on-sidebar) !important;
+}
+.sv-sidebar .dash-range-slider-input {
+  color: var(--text-on-sidebar) !important;
+}
+
 /* ── Navegación (VISTAS): ítem activo como "pill" ─────────────── */
 /* Overlay translúcido blanco: se ve bien sobre cualquier color de sidebar
    (azul en claro, navy oscuro en oscuro) sin perderse contra el fondo. */

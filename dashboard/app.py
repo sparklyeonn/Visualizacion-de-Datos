@@ -41,6 +41,7 @@ C_ACCENT3  = "#F472B6"   # rosa/magenta
 C_ACCENT4  = "#10B981"   # verde esmeralda
 C_MOVIE    = "#7C3AED"   # películas → violeta
 C_SHOW     = "#06B6D4"   # series → cyan
+C_HIGHLIGHT = "#F5A623"  # dorado de énfasis — resalta el hallazgo principal (bump chart)
 
 FONT = "Inter, system-ui, sans-serif"
 
@@ -223,7 +224,6 @@ sidebar_body = html.Div([
             {"label":"Catálogo",              "value":"tab-catalogo"},
             {"label":"Geografía & Idiomas",   "value":"tab-geo"},
             {"label":"Popularidad",           "value":"tab-pop"},
-            {"label":"Evolución Temporal",    "value":"tab-temporal"},
         ],
         value="tab-catalogo",
         labelStyle={
@@ -361,7 +361,6 @@ def update_title(tab):
         "tab-catalogo": "Composición del Catálogo",
         "tab-geo":       "Geografía e Idiomas",
         "tab-pop":       "Popularidad y Valoración",
-        "tab-temporal":  "Evolución Temporal",
     }
     return titles.get(tab, "StreamView Analytics")
 
@@ -575,6 +574,82 @@ def render_tab(tab, tipo, years, top_n, theme):
     # ══ POPULARIDAD ═══════════════════════════════════════════════
     elif tab == "tab-pop":
 
+        # ── HALLAZGO PRINCIPAL: ¿el género que más se produce es el más popular? ──
+        # Gráfico de pendientes (bump chart): compara, para cada género, su
+        # ranking por volumen de producción vs. su ranking por popularidad
+        # promedio, en una sola vista — sin tener que cruzar pestañas.
+        rows_g_pop = []
+        for _, row in df.dropna(subset=["genres"]).iterrows():
+            for g in row["genres"].split(", "):
+                rows_g_pop.append({"Género": g, "popularity": row["popularity"]})
+        gpdf = pd.DataFrame(rows_g_pop)
+
+        insight_banner = None
+        fig_bump = go.Figure()
+
+        if len(gpdf) > 0 and gpdf["Género"].nunique() >= 2:
+            vol = gpdf.groupby("Género").size().rename("Cantidad")
+            pop = gpdf.groupby("Género")["popularity"].mean().rename("PopProm")
+            rank_df = pd.concat([vol, pop], axis=1).reset_index()
+            rank_df["rank_vol"] = rank_df["Cantidad"].rank(ascending=False, method="min").astype(int)
+            rank_df["rank_pop"] = rank_df["PopProm"].rank(ascending=False, method="min").astype(int)
+            n_generos = len(rank_df)
+
+            n_mostrar = max(3, min(top_n, 6))
+            plot_df = rank_df.nsmallest(n_mostrar, "rank_vol").sort_values("rank_vol")
+            lider = plot_df.iloc[0]
+
+            for _, r in plot_df.iterrows():
+                es_lider = r["Género"] == lider["Género"]
+                color_line = C_HIGHLIGHT if es_lider else C_MUTED
+                width_line = 4 if es_lider else 1.5
+                op = 0.95 if es_lider else 0.45
+                # Solo el líder lleva texto en ambos extremos; el resto solo
+                # se identifica al inicio (izquierda), con detalle vía hover.
+                if es_lider:
+                    texto = [f"#{int(r['rank_vol'])} {r['Género']}", f"#{int(r['rank_pop'])}"]
+                    pos_texto = ["middle left", "middle right"]
+                else:
+                    texto = [r["Género"], ""]
+                    pos_texto = ["middle left", "middle right"]
+                fig_bump.add_trace(go.Scatter(
+                    x=["Ranking por volumen", "Ranking por popularidad"],
+                    y=[r["rank_vol"], r["rank_pop"]],
+                    mode="lines+markers+text",
+                    line=dict(color=color_line, width=width_line),
+                    marker=dict(color=color_line, size=7),
+                    text=texto,
+                    textposition=pos_texto,
+                    textfont=dict(color=color_line, size=12 if es_lider else 9.5),
+                    opacity=op,
+                    hovertemplate=f"<b>{r['Género']}</b><br>Puesto por volumen: #{int(r['rank_vol'])}<br>"
+                                  f"Puesto por popularidad: #{int(r['rank_pop'])} de {n_generos}<extra></extra>",
+                    showlegend=False,
+                ))
+
+            lay_bump = base_layout("El género que domina el catálogo, ¿domina también el interés del público?",
+                                    bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+            lay_bump["yaxis"]["autorange"] = "reversed"
+            lay_bump["yaxis"]["title"] = "Puesto en el ranking (1 = líder)"
+            lay_bump["xaxis"]["showgrid"] = False
+            lay_bump["margin"] = dict(l=150, r=70, t=44, b=8)
+            lay_bump["xaxis"]["range"] = [-0.35, 1.15]
+            fig_bump.update_layout(**lay_bump)
+
+            salto = int(lider["rank_pop"] - lider["rank_vol"])
+            if salto > 0:
+                texto_banner = (f"{lider['Género']} lidera el catálogo en volumen (puesto #1) pero cae al puesto "
+                                 f"#{int(lider['rank_pop'])} de {n_generos} en popularidad promedio.")
+            else:
+                texto_banner = (f"{lider['Género']} lidera tanto en volumen como en popularidad — "
+                                 f"en este subconjunto filtrado, ambos rankings coinciden.")
+            insight_banner = html.Div(texto_banner, style={
+                "fontSize":"13px","fontWeight":"700","color":C_HIGHLIGHT,
+                "padding":"10px 16px","marginBottom":"12px",
+                "backgroundColor":"rgba(245,166,35,0.10)","borderRadius":"10px",
+                "border":"1px solid rgba(245,166,35,0.35)",
+            })
+
         p95   = df["popularity"].quantile(0.95)
         df_sc = df[(df["popularity"] <= p95) & (df["vote_average"] > 0)].copy()
         sample = df_sc.sample(n=min(3500, len(df_sc)), random_state=42)
@@ -713,7 +788,18 @@ def render_tab(tab, tipo, years, top_n, theme):
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )
 
+        bloque_hallazgo = []
+        if insight_banner is not None:
+            bloque_hallazgo = [
+                insight_banner,
+                dbc.Row([
+                    dbc.Col(card(dcc.Graph(figure=fig_bump, config={"displayModeBar": False, "responsive": True},
+                                 style={"height": "340px"}), padding="16px"), width=12),
+                ], className="g-3 mb-3"),
+            ]
+
         return html.Div([
+            *bloque_hallazgo,
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_sc, config={"displayModeBar":False,"responsive":True},
                              style={"height":"320px"}), padding="16px"), xs=12, lg=7),
@@ -730,99 +816,6 @@ def render_tab(tab, tipo, years, top_n, theme):
                              style={"height":"280px"}), padding="16px"), width=12),
             ], className="mt-3"),
             nota_cp,
-        ])
-
-    # ══ EVOLUCIÓN TEMPORAL ════════════════════════════════════════
-    elif tab == "tab-temporal":
-
-        evol = df.groupby(["year_added","type_label"]).size().reset_index(name="Cantidad")
-
-        fig_ev = go.Figure()
-        for tipo_val, color in [("Película",C_MOVIE),("Serie",C_SHOW)]:
-            d = evol[evol["type_label"]==tipo_val].sort_values("year_added")
-            # Área rellena
-            fig_ev.add_trace(go.Scatter(
-                x=d["year_added"], y=d["Cantidad"],
-                name=tipo_val, mode="lines+markers",
-                line=dict(color=color, width=2.5, shape="spline"),
-                marker=dict(size=6, color=color),
-                fill="tozeroy",
-                hovertemplate=f"{tipo_val} %{{x}}: %{{y:,}} contenidos<extra></extra>",
-            ))
-        # Usar fill con alpha manual
-        fig_ev.data[0].fillcolor = "rgba(124,58,237,0.08)"
-        if len(fig_ev.data) > 1:
-            fig_ev.data[1].fillcolor = "rgba(6,182,212,0.08)"
-
-        lay_ev = base_layout("Incorporación de contenidos al catálogo por año", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
-        lay_ev["xaxis"]["title"] = "Año de incorporación"
-        lay_ev["yaxis"]["title"] = "Contenidos incorporados"
-        lay_ev["xaxis"]["dtick"] = 2
-        fig_ev.update_layout(**lay_ev)
-
-        # Estrenos por año de producción
-        evol_rel = df[df["release_year"]>=1990].groupby(
-            ["release_year","type_label"]
-        ).size().reset_index(name="Cantidad")
-
-        fig_rel = go.Figure()
-        for tipo_val, color in [("Película",C_MOVIE),("Serie",C_SHOW)]:
-            d = evol_rel[evol_rel["type_label"]==tipo_val].sort_values("release_year")
-            fig_rel.add_trace(go.Scatter(
-                x=d["release_year"], y=d["Cantidad"],
-                name=tipo_val, mode="lines",
-                line=dict(color=color, width=2, shape="spline"),
-                fill="tozeroy",
-                hovertemplate=f"{tipo_val} %{{x}}: %{{y:,}}<extra></extra>",
-            ))
-        fig_rel.data[0].fillcolor = "rgba(124,58,237,0.08)"
-        if len(fig_rel.data) > 1:
-            fig_rel.data[1].fillcolor = "rgba(6,182,212,0.08)"
-
-        lay_rel = base_layout("Año de producción de los contenidos (desde 1990)", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
-        lay_rel["xaxis"]["title"] = "Año de estreno"
-        lay_rel["yaxis"]["title"] = "Cantidad de contenidos"
-        fig_rel.update_layout(**lay_rel)
-
-        # Heatmap de incorporación por año y tipo
-        heat_data = df.groupby(["type_label", "year_added"]).size().reset_index(name="Cantidad")
-        heat_pivot = heat_data.pivot(index="type_label", columns="year_added", values="Cantidad").fillna(0)
-
-        fig_heat = go.Figure(go.Heatmap(
-            z=heat_pivot.values,
-            x=heat_pivot.columns,
-            y=heat_pivot.index,
-            colorscale=[[0, BG_CHART], [0.5, "rgba(124,58,237,0.53)"], [1, C_MOVIE]],
-            showscale=False,
-            texttemplate="%{z:,}",
-            textfont=dict(size=10, color=C_TEXT),
-            hovertemplate="%{y} — %{x}: %{z:,}<extra></extra>",
-        ))
-        lay_heat = base_layout("Incorporación anual al catálogo — Películas vs. Series", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
-        lay_heat["xaxis"]["title"] = "Año"
-        lay_heat["yaxis"]["title"] = ""
-        lay_heat["xaxis"]["showgrid"] = False
-        lay_heat["yaxis"]["showgrid"] = False
-        fig_heat.update_layout(**lay_heat)
-
-        nota_t = html.Div(
-            "ℹ Dataset muestreado: 1.000 registros/año por categoría → "
-            "la distribución temporal uniforme es por diseño, no refleja el ritmo real de incorporación.",
-            style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
-        )
-
-        return html.Div([
-            dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_ev,  config={"displayModeBar":False,"responsive":True},
-                             style={"height":"300px"}), padding="16px"), xs=12, lg=6),
-                dbc.Col(card(dcc.Graph(figure=fig_rel, config={"displayModeBar":False,"responsive":True},
-                             style={"height":"300px"}), padding="16px"), xs=12, lg=6),
-            ], className="g-3 mb-3"),
-            dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_heat, config={"displayModeBar":False,"responsive":True},
-                             style={"height":"180px"}), padding="16px"), width=12),
-            ]),
-            nota_t,
         ])
 
     return html.Div()
