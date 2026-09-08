@@ -39,9 +39,11 @@ C_ACCENT1  = "#7C3AED"   # violeta principal
 C_ACCENT2  = "#06B6D4"   # cyan
 C_ACCENT3  = "#F472B6"   # rosa/magenta
 C_ACCENT4  = "#10B981"   # verde esmeralda
+C_ACCENT5  = "#3B82F6"   # azul
+C_ACCENT6  = "#EF4444"   # rojo
 C_MOVIE    = "#7C3AED"   # películas → violeta
 C_SHOW     = "#06B6D4"   # series → cyan
-C_HIGHLIGHT = "#F5A623"  # dorado de énfasis — resalta el hallazgo principal (bump chart)
+C_HIGHLIGHT = "#F5A623"  # dorado de énfasis — resalta el hallazgo principal (bump chart) y el KPI destacado
 
 FONT = "Inter, system-ui, sans-serif"
 
@@ -381,13 +383,13 @@ def update_kpis(tipo, years):
     val_avg  = df["vote_average"].mean()
 
     kpis = [
-        ("Total Contenidos",   f"{total:,}",       "catálogo completo",        C_ACCENT_PRIMARY),
+        ("Total Contenidos",   f"{total:,}",       "catálogo completo",        C_HIGHLIGHT),
         ("Películas",          f"{pel:,}",          f"{pel/total*100:.0f}% del total", C_MOVIE),
         ("Series",             f"{ser:,}",          f"{ser/total*100:.0f}% del total", C_SHOW),
         ("Países",             f"{paises}",          "países productores",       C_ACCENT4),
         ("Idiomas",            f"{idiomas}",         "idiomas disponibles",      C_ACCENT3),
-        ("Popularidad Prom.",  f"{pop_avg:.1f}",    "índice TMDB relativo",     C_ACCENT2),
-        ("Calificación Prom.", f"{val_avg:.2f}/10", "escala 0–10",              C_ACCENT4),
+        ("Popularidad Prom.",  f"{pop_avg:.1f}",    "índice TMDB relativo",     C_ACCENT5),
+        ("Calificación Prom.", f"{val_avg:.2f}/10", "escala 0–10",              C_ACCENT6),
     ]
 
     cols = []
