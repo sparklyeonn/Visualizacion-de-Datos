@@ -47,24 +47,17 @@ C_HIGHLIGHT = "#F5A623"
 FONT = "Inter, system-ui, sans-serif"
 
 LANG_MAP = {
-    "en":"Inglés",
-    "fr":"Francés",
-    "ja":"Japonés",
-    "ko":"Coreano",
-    "es":"Español",
-    "zh":"Chino",
-    "it":"Italiano",
-    "hi":"Hindi",
-    "de":"Alemán",
-    "ru":"Ruso",
-    "tl":"Filipino",
-    "ar":"Árabe",
-    "pt":"Portugués",
-    "nl":"Holandés",
+    "en":"Inglés","fr":"Francés",
+    "ja":"Japonés","ko":"Coreano",
+    "es":"Español","zh":"Chino",
+    "it":"Italiano","hi":"Hindi",
+    "de":"Alemán","ru":"Ruso",
+    "tl":"Filipino","ar":"Árabe",
+    "pt":"Portugués","nl":"Holandés",
     "tr":"Turco"
 }
 
-#  CARGA 
+# CARGA 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
@@ -91,7 +84,7 @@ combined = pd.concat([movies[COMMON], shows[COMMON]], ignore_index=True)
 YEAR_MIN = int(combined["year_added"].min())
 YEAR_MAX = int(combined["year_added"].max())
 
-# ── HELPERS ──────────────────────────────────────────────────────
+# HELPERS
 def filtrar(tipo="Todos", year_range=None):
     df = combined.copy()
     if tipo and tipo != "Todos":
@@ -162,194 +155,277 @@ def kpi_card(label, value, subtitle="", color=C_ACCENT1, icon=""):
 # ══════════════════════════════════════════════════════════════════
 def generar_infografia_png(tipo, year_range):
     """
-    Genera una infografía resumen en PNG como bytes base64.
-    Respeta los filtros activos (tipo de contenido + rango de años).
+    Infografía vertical estilo poster: fondo negro, tipografía bold impactante,
+    tarjetas de stats, lista de pasos con timeline, donut chart.
+    Formato: 800×1400 px a 100 dpi → 8×14 pulgadas.
     """
-    df = filtrar(tipo, year_range)
+    from collections import Counter
+    import matplotlib.patches as mpatches
+    from matplotlib.patches import FancyBboxPatch, Circle, FancyArrowPatch
+    import matplotlib.patheffects as pe
 
+    df = filtrar(tipo, year_range)
     y0 = int(year_range[0]) if year_range else YEAR_MIN
     y1 = int(year_range[1]) if year_range else YEAR_MAX
 
-    # ── Paleta fija de la infografía (siempre oscura, independiente del tema del dashboard)
-    BG       = "#0F1117"
-    BG_CARD_ = "#1A1D27"
-    ACCENT   = "#7C3AED"   # violeta = películas
-    CYAN     = "#06B6D4"   # cyan = series
-    GOLD     = "#F5A623"   # dorado = hallazgo
-    WHITE    = "#E2E8F0"
-    GRAY     = "#64748B"
-    BORDER   = "#2D3148"
+    # Paleta (inspirada en imagen de referencia)
+    BG       = "#000000"
+    BG_CARD_ = "#111111"
+    BG_CARD2 = "#1A1A2E"
+    BLUE     = "#4169E1"   # azul eléctrico (accent principal)
+    BLUE2    = "#5B7FFF"   # azul más claro para textos grandes
+    WHITE    = "#FFFFFF"
+    GRAY     = "#888888"
+    DARK_G   = "#333333"
+    BORDER_C = "#222244"
 
-    # ── KPIs base
-    total   = len(df)
-    n_pel   = len(df[df["type_label"] == "Película"])
-    n_ser   = len(df[df["type_label"] == "Serie"])
-    pct_pel = n_pel / total * 100 if total > 0 else 0
-    pct_ser = n_ser / total * 100 if total > 0 else 0
-    n_paises = int(df["country"].dropna().str.split(", ").explode().nunique())
-    n_idiomas = int(df["language"].nunique())
-    pop_avg  = df["popularity"].mean() if total > 0 else 0
-    val_avg  = df["vote_average"].mean() if total > 0 else 0
+    # Datos
+    total    = len(df)
+    n_pel    = len(df[df["type_label"] == "Película"])
+    n_ser    = len(df[df["type_label"] == "Serie"])
+    pct_pel  = n_pel / total * 100 if total > 0 else 0
+    pct_ser  = n_ser / total * 100 if total > 0 else 0
 
-    # País #1
     paises_exploded = df["country"].dropna().str.split(", ").explode()
-    pais_top = paises_exploded.value_counts().index[0] if len(paises_exploded) > 0 else "N/D"
+    n_paises  = int(paises_exploded.nunique())
+    n_idiomas = int(df["language"].nunique())
+    val_avg   = df["vote_average"].mean() if total > 0 else 0
+    pop_avg   = df["popularity"].mean() if total > 0 else 0
 
-    # Año pico
-    evol = df.groupby("year_added").size()
-    anio_pico = int(evol.idxmax()) if len(evol) > 0 else y0
-
-    # Top 5 géneros
     rows_g = []
     for _, row in df.dropna(subset=["genres"]).iterrows():
         for g in row["genres"].split(", "):
             rows_g.append(g)
-    from collections import Counter
     generos_cnt = Counter(rows_g)
-    top5_gen = [(g, c) for g, c in generos_cnt.most_common(5)]
+    top5_gen = generos_cnt.most_common(5)
 
-    # Top 5 países
-    top5_paises = paises_exploded.value_counts().head(5)
+    top3_paises = paises_exploded.value_counts().head(3)
 
-    # Evolución temporal (todos los años del rango)
-    evol_full = df.groupby(["year_added", "type_label"]).size().reset_index(name="Cantidad")
+    # Canvas vertical
+    fig = plt.figure(figsize=(8, 14), facecolor=BG)
+    fig.patch.set_facecolor(BG)
 
-    # ── Figura principal
-    fig = plt.figure(figsize=(14, 9), facecolor=BG)
+    # Usamos un GridSpec para organizar secciones
+    from matplotlib.gridspec import GridSpec
+    gs = GridSpec(
+        7, 2,
+        figure=fig,
+        left=0.06, right=0.94,
+        top=0.97, bottom=0.03,
+        hspace=0.55, wspace=0.18,
+        height_ratios=[0.9, 1.5, 1.5, 1.5, 1.8, 1.8, 0.5]
+    )
 
-    # Título principal
-    fig.text(0.5, 0.965, "StreamView Analytics", ha="center", va="top",
-             fontsize=22, fontweight="bold", color=WHITE, fontfamily="DejaVu Sans")
+    tipo_label = tipo if tipo and tipo != "Todos" else "Catálogo completo"
 
-    # Subtítulo con contexto de filtro
-    tipo_label = tipo if tipo and tipo != "Todos" else "Todo el catálogo"
-    fig.text(0.5, 0.935, f"Resumen del catálogo · {tipo_label} · {y0}–{y1}",
-             ha="center", va="top", fontsize=11, color=GRAY, fontfamily="DejaVu Sans")
+    # ══ SECCIÓN 0: TÍTULO ══════════════════════════════════════════
+    ax_title = fig.add_subplot(gs[0, :])
+    ax_title.set_facecolor(BG)
+    ax_title.set_xlim(0, 1); ax_title.set_ylim(0, 1)
+    ax_title.axis("off")
 
-    # Línea divisora bajo título
-    ax_line = fig.add_axes([0.04, 0.915, 0.92, 0.002])
-    ax_line.set_facecolor(BORDER)
-    ax_line.set_xticks([]); ax_line.set_yticks([])
-    for sp in ax_line.spines.values(): sp.set_visible(False)
+    ax_title.text(0.0, 0.98, "VISUALIZACIÓN DE DATOS",
+                  ha="left", va="top", fontsize=8.5, fontweight="bold",
+                  color=WHITE, fontfamily="DejaVu Sans", transform=ax_title.transAxes)
+    ax_title.text(0.0, 0.60, "STREAMVIEW",
+                  ha="left", va="top", fontsize=26, fontweight="bold",
+                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_title.transAxes)
+    ax_title.text(0.0, 0.08, "ANALYTICS",
+                  ha="left", va="top", fontsize=26, fontweight="bold",
+                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_title.transAxes)
+    ax_title.text(1.0, 0.98, f"{tipo_label}  ·  {y0}–{y1}",
+                  ha="right", va="top", fontsize=7.5,
+                  color=GRAY, fontfamily="DejaVu Sans", transform=ax_title.transAxes)
 
-    # ── FILA KPIs (4 tarjetas)
-    kpi_data = [
-        (f"{total:,}",    "Total títulos",       GOLD),
-        (f"{pct_pel:.0f}% / {pct_ser:.0f}%", "Películas / Series", ACCENT),
-        (f"{n_paises}",   "Países productores",  CYAN),
-        (f"{anio_pico}",  "Año pico",            "#10B981"),
+    # ══ SECCIÓN 1–2: TARJETAS DE STATS (2×2) ═══════════════════════
+    stat_cards = [
+        (f"{pct_pel:.0f}%",  "DE CONTENIDO\nSON PELÍCULAS",  gs[1, 0]),
+        (f"{pct_ser:.0f}%",  "DE CONTENIDO\nSON SERIES",     gs[1, 1]),
+        (f"{n_paises}",      "PAÍSES\nPRODUCTORES",           gs[2, 0]),
+        (f"{n_idiomas}",     "IDIOMAS\nDISPONIBLES",          gs[2, 1]),
     ]
-    kpi_xs = [0.04, 0.27, 0.50, 0.73]
-    kpi_w  = 0.21
-    kpi_y  = 0.78
-    kpi_h  = 0.115
 
-    for (val, lab, col), x in zip(kpi_data, kpi_xs):
-        ax_k = fig.add_axes([x, kpi_y, kpi_w, kpi_h])
-        ax_k.set_facecolor(BG_CARD_)
-        ax_k.set_xlim(0, 1); ax_k.set_ylim(0, 1)
-        ax_k.set_xticks([]); ax_k.set_yticks([])
-        for sp in ax_k.spines.values():
-            sp.set_edgecolor(BORDER); sp.set_linewidth(1)
-        ax_k.text(0.5, 0.62, val, ha="center", va="center",
-                  fontsize=18, fontweight="bold", color=col, fontfamily="DejaVu Sans")
-        ax_k.text(0.5, 0.18, lab, ha="center", va="center",
-                  fontsize=9, color=GRAY, fontfamily="DejaVu Sans")
+    for val_txt, label_txt, gspec in stat_cards:
+        ax_s = fig.add_subplot(gspec)
+        ax_s.set_facecolor(BG_CARD_)
+        ax_s.set_xlim(0, 1); ax_s.set_ylim(0, 1)
+        ax_s.axis("off")
+        # Borde azul sutil
+        for sp in ax_s.spines.values():
+            sp.set_visible(True)
+            sp.set_edgecolor(BORDER_C)
+            sp.set_linewidth(1.5)
+        ax_s.text(0.5, 0.72, val_txt,
+                  ha="center", va="center", fontsize=34, fontweight="bold",
+                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_s.transAxes)
+        ax_s.text(0.5, 0.22, label_txt,
+                  ha="center", va="center", fontsize=7.5, fontweight="bold",
+                  color=GRAY, fontfamily="DejaVu Sans", transform=ax_s.transAxes,
+                  linespacing=1.4)
 
-    # ── FILA INFERIOR: 3 paneles
-    # Panel 1: Top 5 géneros
-    ax1 = fig.add_axes([0.04, 0.13, 0.28, 0.56])
-    ax1.set_facecolor(BG_CARD_)
-    for sp in ax1.spines.values(): sp.set_edgecolor(BORDER); sp.set_linewidth(1)
+    # ══ SECCIÓN 3: TARJETA FULL-WIDTH — Total títulos ══════════════
+    ax_total = fig.add_subplot(gs[3, :])
+    ax_total.set_facecolor(BG_CARD2)
+    ax_total.set_xlim(0, 1); ax_total.set_ylim(0, 1)
+    ax_total.axis("off")
+    for sp in ax_total.spines.values():
+        sp.set_visible(True); sp.set_edgecolor(BLUE); sp.set_linewidth(1.5)
 
-    if top5_gen:
-        gen_names = [g for g, _ in reversed(top5_gen)]
-        gen_vals  = [c for _, c in reversed(top5_gen)]
-        max_val   = max(gen_vals) if gen_vals else 1
-        colors_bar = [GOLD if i == len(gen_vals)-1 else ACCENT + "AA" for i in range(len(gen_vals))]
-        bars = ax1.barh(gen_names, gen_vals, color=colors_bar, height=0.55, edgecolor="none")
-        for bar, val in zip(bars, gen_vals):
-            ax1.text(bar.get_width() + max_val * 0.02, bar.get_y() + bar.get_height()/2,
-                     f"{val:,}", va="center", fontsize=8.5, color=WHITE, fontfamily="DejaVu Sans")
-        ax1.set_xlim(0, max_val * 1.25)
-        ax1.tick_params(colors=GRAY, labelsize=8.5)
-        ax1.xaxis.set_visible(False)
-        ax1.set_facecolor(BG_CARD_)
-        for sp in ["top","right","bottom"]: ax1.spines[sp].set_visible(False)
-        ax1.spines["left"].set_edgecolor(BORDER)
-        ax1.tick_params(axis="y", colors=WHITE)
+    ax_total.text(0.5, 0.72, f"{total:,}",
+                  ha="center", va="center", fontsize=44, fontweight="bold",
+                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_total.transAxes)
+    ax_total.text(0.5, 0.22, "TÍTULOS EN EL CATÁLOGO FILTRADO",
+                  ha="center", va="center", fontsize=9, fontweight="bold",
+                  color=WHITE, fontfamily="DejaVu Sans", transform=ax_total.transAxes)
 
-    ax1.set_title("Top 5 géneros", fontsize=10, fontweight="bold",
-                  color=WHITE, pad=8, fontfamily="DejaVu Sans", loc="left")
+    # ══ SECCIÓN 4: TOP GÉNEROS (lista con bullets) ════════════════
+    ax_gen = fig.add_subplot(gs[4, 0])
+    ax_gen.set_facecolor(BG)
+    ax_gen.set_xlim(0, 1); ax_gen.set_ylim(0, 1)
+    ax_gen.axis("off")
 
-    # Panel 2: Evolución temporal
-    ax2 = fig.add_axes([0.375, 0.13, 0.30, 0.56])
-    ax2.set_facecolor(BG_CARD_)
-    for sp in ax2.spines.values(): sp.set_edgecolor(BORDER); sp.set_linewidth(1)
+    ax_gen.text(0.0, 0.97, "TOP GÉNEROS",
+                ha="left", va="top", fontsize=9, fontweight="bold",
+                color=BLUE2, fontfamily="DejaVu Sans", transform=ax_gen.transAxes)
 
-    if len(evol_full) > 0:
-        for tipo_val, col in [("Película", ACCENT), ("Serie", CYAN)]:
-            d = evol_full[evol_full["type_label"] == tipo_val].sort_values("year_added")
-            if len(d) > 0:
-                ax2.plot(d["year_added"], d["Cantidad"], color=col,
-                         linewidth=2, marker="o", markersize=4, label=tipo_val)
-        # Marcar año pico
-        ax2.axvline(anio_pico, color=GOLD, linestyle="--", linewidth=1, alpha=0.7)
-        ax2.text(anio_pico + 0.15, ax2.get_ylim()[1] * 0.92 if ax2.get_ylim()[1] > 0 else 1,
-                 f"Pico {anio_pico}", fontsize=7.5, color=GOLD, fontfamily="DejaVu Sans")
-        ax2.legend(fontsize=8, labelcolor=GRAY, facecolor=BG_CARD_, edgecolor=BORDER,
-                   framealpha=0.7)
-        ax2.tick_params(colors=GRAY, labelsize=8)
-        ax2.set_facecolor(BG_CARD_)
-        ax2.spines["bottom"].set_edgecolor(BORDER)
-        ax2.spines["left"].set_edgecolor(BORDER)
-        for sp in ["top","right"]: ax2.spines[sp].set_visible(False)
-        ax2.tick_params(axis="x", colors=GRAY)
-        ax2.tick_params(axis="y", colors=GRAY)
-        ax2.yaxis.set_tick_params(labelcolor=GRAY)
+    # Línea separadora
+    ax_gen.axhline(0.90, color=BLUE, linewidth=1, xmin=0, xmax=1)
 
-    ax2.set_title("Incorporaciones por año", fontsize=10, fontweight="bold",
-                  color=WHITE, pad=8, fontfamily="DejaVu Sans", loc="left")
+    n_show = min(5, len(top5_gen))
+    y_positions = [0.78 - i * 0.165 for i in range(n_show)]
+    for i, ((gen, cnt), yp) in enumerate(zip(top5_gen, y_positions)):
+        # Bullet circle
+        circ = Circle((0.05, yp + 0.03), 0.045,
+                       transform=ax_gen.transAxes,
+                       facecolor=BLUE if i == 0 else DARK_G,
+                       edgecolor=BLUE, linewidth=1.2, zorder=3)
+        ax_gen.add_patch(circ)
+        ax_gen.text(0.05, yp + 0.03, str(i + 1),
+                    ha="center", va="center", fontsize=7, fontweight="bold",
+                    color=WHITE, fontfamily="DejaVu Sans",
+                    transform=ax_gen.transAxes, zorder=4)
+        # Línea conectora vertical (excepto último)
+        if i < n_show - 1:
+            ax_gen.plot([0.05, 0.05], [yp - 0.065, yp - 0.01],
+                        color=BLUE, linewidth=1,
+                        transform=ax_gen.transAxes, zorder=2, alpha=0.5)
+        # Texto
+        ax_gen.text(0.16, yp + 0.05, gen,
+                    ha="left", va="center", fontsize=8.5, fontweight="bold",
+                    color=WHITE, fontfamily="DejaVu Sans", transform=ax_gen.transAxes)
+        ax_gen.text(0.16, yp - 0.03, f"{cnt:,} títulos",
+                    ha="left", va="center", fontsize=7,
+                    color=GRAY, fontfamily="DejaVu Sans", transform=ax_gen.transAxes)
 
-    # Panel 3: Top 5 países
-    ax3 = fig.add_axes([0.715, 0.13, 0.265, 0.56])
-    ax3.set_facecolor(BG_CARD_)
-    for sp in ax3.spines.values(): sp.set_edgecolor(BORDER); sp.set_linewidth(1)
+    # ══ SECCIÓN 4: DONUT — Películas vs Series ════════════════════
+    ax_donut = fig.add_subplot(gs[4, 1])
+    ax_donut.set_facecolor(BG)
+    ax_donut.axis("off")
 
-    if len(top5_paises) > 0:
-        p_names = list(reversed(top5_paises.index.tolist()))
-        p_vals  = list(reversed(top5_paises.values.tolist()))
-        max_p   = max(p_vals) if p_vals else 1
-        colors_p = [GOLD if i == len(p_vals)-1 else CYAN + "AA" for i in range(len(p_vals))]
-        bars3 = ax3.barh(p_names, p_vals, color=colors_p, height=0.55, edgecolor="none")
-        for bar, val in zip(bars3, p_vals):
-            ax3.text(bar.get_width() + max_p * 0.02, bar.get_y() + bar.get_height()/2,
-                     f"{val:,}", va="center", fontsize=8.5, color=WHITE, fontfamily="DejaVu Sans")
-        ax3.set_xlim(0, max_p * 1.28)
-        ax3.xaxis.set_visible(False)
-        ax3.set_facecolor(BG_CARD_)
-        for sp in ["top","right","bottom"]: ax3.spines[sp].set_visible(False)
-        ax3.spines["left"].set_edgecolor(BORDER)
-        ax3.tick_params(axis="y", colors=WHITE, labelsize=8.5)
+    ax_donut.text(0.5, 0.97, "COMPOSICIÓN",
+                  ha="center", va="top", fontsize=9, fontweight="bold",
+                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_donut.transAxes)
 
-    ax3.set_title("Top 5 países", fontsize=10, fontweight="bold",
-                  color=WHITE, pad=8, fontfamily="DejaVu Sans", loc="left")
+    # Donut manual con wedges
+    inner_ax = ax_donut.inset_axes([0.05, 0.05, 0.90, 0.82])
+    inner_ax.set_facecolor(BG)
+    inner_ax.axis("equal")
 
-    # ── Pie de página
-    fig.text(0.5, 0.025,
-             f"Fuente: TMDB · Dataset StreamView Analytics · ADY1104 Visualización de Datos · Duoc UC 2026",
-             ha="center", va="bottom", fontsize=8, color=GRAY, fontfamily="DejaVu Sans")
+    donut_vals = [n_pel if n_pel > 0 else 0.01, n_ser if n_ser > 0 else 0.01]
+    donut_cols = [BLUE2, DARK_G]
+    wedges, _ = inner_ax.pie(
+        donut_vals,
+        colors=donut_cols,
+        startangle=90,
+        wedgeprops=dict(width=0.45, edgecolor=BG, linewidth=2),
+    )
+    # Texto central
+    inner_ax.text(0, 0.12, f"{pct_pel:.0f}%",
+                  ha="center", va="center", fontsize=20, fontweight="bold",
+                  color=BLUE2, fontfamily="DejaVu Sans")
+    inner_ax.text(0, -0.22, "películas",
+                  ha="center", va="center", fontsize=7,
+                  color=GRAY, fontfamily="DejaVu Sans")
+    # Leyenda simple
+    inner_ax.text(-1.25, -1.35, f"● Películas  {pct_pel:.0f}%",
+                  ha="left", fontsize=7, color=BLUE2, fontfamily="DejaVu Sans")
+    inner_ax.text(-1.25, -1.65, f"● Series       {pct_ser:.0f}%",
+                  ha="left", fontsize=7, color=GRAY, fontfamily="DejaVu Sans")
 
-    # ── Exportar a PNG en memoria
+    # ══ SECCIÓN 5: TOP 3 PAÍSES + CALIFICACIÓN PROMEDIO ══════════
+    ax_paises = fig.add_subplot(gs[5, 0])
+    ax_paises.set_facecolor(BG)
+    ax_paises.set_xlim(0, 1); ax_paises.set_ylim(0, 1)
+    ax_paises.axis("off")
+
+    ax_paises.text(0.0, 0.97, "TOP PAÍSES",
+                   ha="left", va="top", fontsize=9, fontweight="bold",
+                   color=BLUE2, fontfamily="DejaVu Sans", transform=ax_paises.transAxes)
+    ax_paises.axhline(0.90, color=BLUE, linewidth=1, xmin=0, xmax=1)
+
+    p_ypos = [0.75, 0.54, 0.33]
+    for i, (pais, cnt) in enumerate(zip(top3_paises.index, top3_paises.values)):
+        yp = p_ypos[i]
+        circ2 = Circle((0.05, yp + 0.01), 0.045,
+                        transform=ax_paises.transAxes,
+                        facecolor=BLUE if i == 0 else DARK_G,
+                        edgecolor=BLUE, linewidth=1.2, zorder=3)
+        ax_paises.add_patch(circ2)
+        ax_paises.text(0.05, yp + 0.01, str(i + 1),
+                       ha="center", va="center", fontsize=7, fontweight="bold",
+                       color=WHITE, fontfamily="DejaVu Sans",
+                       transform=ax_paises.transAxes, zorder=4)
+        if i < 2:
+            ax_paises.plot([0.05, 0.05], [yp - 0.085, yp - 0.025],
+                           color=BLUE, linewidth=1,
+                           transform=ax_paises.transAxes, zorder=2, alpha=0.5)
+        ax_paises.text(0.16, yp + 0.06, pais,
+                       ha="left", va="center", fontsize=8.5, fontweight="bold",
+                       color=WHITE, fontfamily="DejaVu Sans", transform=ax_paises.transAxes)
+        ax_paises.text(0.16, yp - 0.04, f"{cnt:,} títulos",
+                       ha="left", va="center", fontsize=7,
+                       color=GRAY, fontfamily="DejaVu Sans", transform=ax_paises.transAxes)
+
+    # Panel derecho: calificación promedio
+    ax_val = fig.add_subplot(gs[5, 1])
+    ax_val.set_facecolor(BG_CARD2)
+    ax_val.set_xlim(0, 1); ax_val.set_ylim(0, 1)
+    ax_val.axis("off")
+    for sp in ax_val.spines.values():
+        sp.set_visible(True); sp.set_edgecolor(BORDER_C); sp.set_linewidth(1.5)
+
+    ax_val.text(0.5, 0.85, f"{val_avg:.1f}",
+                ha="center", va="center", fontsize=40, fontweight="bold",
+                color=BLUE2, fontfamily="DejaVu Sans", transform=ax_val.transAxes)
+    ax_val.text(0.5, 0.50, "/ 10",
+                ha="center", va="center", fontsize=12,
+                color=GRAY, fontfamily="DejaVu Sans", transform=ax_val.transAxes)
+    ax_val.text(0.5, 0.25, "CALIFICACIÓN\nPROMEDIO",
+                ha="center", va="center", fontsize=7.5, fontweight="bold",
+                color=WHITE, fontfamily="DejaVu Sans", transform=ax_val.transAxes,
+                linespacing=1.4)
+
+    # ══ SECCIÓN 6: PIE DE PÁGINA ══════════════════════════════════
+    ax_foot = fig.add_subplot(gs[6, :])
+    ax_foot.set_facecolor(BG)
+    ax_foot.set_xlim(0, 1); ax_foot.set_ylim(0, 1)
+    ax_foot.axis("off")
+    ax_foot.axhline(0.90, color=DARK_G, linewidth=0.8, xmin=0, xmax=1)
+    ax_foot.text(0.5, 0.45,
+                 "Fuente: TMDB  ·  ADY1104 Visualización de Datos  ·  Duoc UC 2026",
+                 ha="center", va="center", fontsize=6.5,
+                 color=GRAY, fontfamily="DejaVu Sans", transform=ax_foot.transAxes)
+
+    # Exportar a PNG en memoria
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
+    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight",
                 facecolor=BG, edgecolor="none")
     plt.close(fig)
     buf.seek(0)
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
-# ── ESTILOS CSS GLOBALES ─────────────────────────────────────────
+# ESTILOS CSS GLOBALES─
 external_css = [
     dbc.themes.BOOTSTRAP,
     "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
@@ -360,7 +436,7 @@ app = Dash(__name__,
            title="StreamView Analytics")
 server = app.server
 
-# ── SIDEBAR ──────────────────────────────────────────────────────
+# SIDEBAR
 sidebar_header = html.Div([
     html.Div([
         html.Div("▶", style={
@@ -464,7 +540,7 @@ sidebar = html.Div([
     "overflowY":"auto",
 })
 
-# ── LAYOUT PRINCIPAL ─────────────────────────────────────────────
+# LAYOUT PRINCIPAL─
 app.layout = html.Div([
     dcc.Store(id="theme-mode", storage_type="local", data="system"),
     dcc.Store(id="theme-resolved", data="dark"),
@@ -524,7 +600,7 @@ app.layout = html.Div([
 ], style={"backgroundColor":BG_MAIN,"fontFamily":FONT})
 
 
-# ── TEMA (claro / oscuro / automático) ──────────────────────────
+# TEMA (claro / oscuro / automático)
 app.clientside_callback(
     """
     function(n_clicks, mode) {
@@ -559,7 +635,7 @@ app.clientside_callback(
 )
 
 
-# ── CALLBACKS ────────────────────────────────────────────────────
+# CALLBACKS
 
 @app.callback(
     Output("sidebar-body","className"),
@@ -622,7 +698,7 @@ def update_kpis(tipo, years):
     return dbc.Row(cols, className="g-2")
 
 
-# ── CALLBACK: DESCARGA INFOGRAFÍA ────────────────────────────────
+# CALLBACK: DESCARGA INFOGRAFÍA 
 @app.callback(
     Output("download-infografia", "data"),
     Input("btn-descargar-infografia", "n_clicks"),
