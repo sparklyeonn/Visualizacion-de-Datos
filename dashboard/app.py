@@ -1,11 +1,15 @@
 """
-STREAMVIEW ANALYTICS — EP1 | DASHBOARD INTERACTIVO
-Diseño oscuro profesional | ADY1104 Duoc UC 2026
+STREAMVIEW ANALYTICS | DASHBOARD INTERACTIVO
+Diseño Visualización de Datos | ADY1104 Duoc UC 2026
 """
 
-import os, warnings
+import os, warnings, io, base64
 import pandas as pd
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, ctx
@@ -13,9 +17,7 @@ import dash_bootstrap_components as dbc
 
 warnings.filterwarnings("ignore")
 
-# ── COLORES DE INTERFAZ (chrome) ────────────────────────────────
-# Usan variables CSS (definidas en assets/theme.css) para que el cambio
-# de tema claro/oscuro/automático sea instantáneo, sin recargar nada.
+# COLORES DE INTERFAZ (chrome) 
 BG_MAIN              = "var(--bg-page)"
 BG_CARD              = "var(--bg-card)"
 BG_SIDEBAR           = "var(--bg-sidebar)"
@@ -24,36 +26,45 @@ C_TEXT_SIDEBAR       = "var(--text-on-sidebar)"
 C_MUTED              = "var(--text-muted)"
 C_MUTED_SIDEBAR      = "var(--text-muted-on-sidebar)"
 C_BORDER             = "var(--border-color)"
-C_ACCENT_PRIMARY     = "var(--accent-primary)"   # color de marca: azul en claro, violeta en oscuro
+C_ACCENT_PRIMARY     = "var(--accent-primary)"
 
-# ── COLORES DE GRÁFICOS (Plotly) ────────────────────────────────
-# Plotly dibuja en SVG y no resuelve var(css) de forma confiable, así que
-# estos necesitan valores literales según el tema resuelto (claro/oscuro).
+# COLORES DE GRÁFICOS (Plotly) 
 CHART_THEMES = {
     "dark":  dict(bg="#1A1D27", text="#E2E8F0", muted="#64748B", border="#2D3148"),
     "light": dict(bg="#FFFFFF", text="#0F172A", muted="#64748B", border="#E2E8F0"),
 }
 
-# Colores categóricos — se mantienen iguales en ambos temas (identidad de datos)
-C_ACCENT1  = "#7C3AED"   # violeta principal
-C_ACCENT2  = "#06B6D4"   # cyan
-C_ACCENT3  = "#F472B6"   # rosa/magenta
-C_ACCENT4  = "#10B981"   # verde esmeralda
-C_ACCENT5  = "#3B82F6"   # azul
-C_ACCENT6  = "#EF4444"   # rojo
-C_MOVIE    = "#7C3AED"   # películas → violeta
-C_SHOW     = "#06B6D4"   # series → cyan
-C_HIGHLIGHT = "#F5A623"  # dorado de énfasis — resalta el hallazgo principal (bump chart) y el KPI destacado
+C_ACCENT1  = "#7C3AED"
+C_ACCENT2  = "#06B6D4"
+C_ACCENT3  = "#F472B6"
+C_ACCENT4  = "#10B981"
+C_ACCENT5  = "#3B82F6"
+C_ACCENT6  = "#EF4444"
+C_MOVIE    = "#7C3AED"
+C_SHOW     = "#06B6D4"
+C_HIGHLIGHT = "#F5A623"
 
 FONT = "Inter, system-ui, sans-serif"
 
 LANG_MAP = {
-    "en":"Inglés","fr":"Francés","ja":"Japonés","ko":"Coreano","es":"Español",
-    "zh":"Chino","it":"Italiano","hi":"Hindi","de":"Alemán","ru":"Ruso",
-    "tl":"Filipino","ar":"Árabe","pt":"Portugués","nl":"Holandés","tr":"Turco"
+    "en":"Inglés",
+    "fr":"Francés",
+    "ja":"Japonés",
+    "ko":"Coreano",
+    "es":"Español",
+    "zh":"Chino",
+    "it":"Italiano",
+    "hi":"Hindi",
+    "de":"Alemán",
+    "ru":"Ruso",
+    "tl":"Filipino",
+    "ar":"Árabe",
+    "pt":"Portugués",
+    "nl":"Holandés",
+    "tr":"Turco"
 }
 
-# ── CARGA ────────────────────────────────────────────────────────
+#  CARGA 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
@@ -144,6 +155,199 @@ def kpi_card(label, value, subtitle="", color=C_ACCENT1, icon=""):
         }),
         html.Div(subtitle, style={"fontSize":"10px","color":C_MUTED}),
     ], padding="16px 18px")
+
+
+# ══════════════════════════════════════════════════════════════════
+# GENERADOR DE INFOGRAFÍA
+# ══════════════════════════════════════════════════════════════════
+def generar_infografia_png(tipo, year_range):
+    """
+    Genera una infografía resumen en PNG como bytes base64.
+    Respeta los filtros activos (tipo de contenido + rango de años).
+    """
+    df = filtrar(tipo, year_range)
+
+    y0 = int(year_range[0]) if year_range else YEAR_MIN
+    y1 = int(year_range[1]) if year_range else YEAR_MAX
+
+    # ── Paleta fija de la infografía (siempre oscura, independiente del tema del dashboard)
+    BG       = "#0F1117"
+    BG_CARD_ = "#1A1D27"
+    ACCENT   = "#7C3AED"   # violeta = películas
+    CYAN     = "#06B6D4"   # cyan = series
+    GOLD     = "#F5A623"   # dorado = hallazgo
+    WHITE    = "#E2E8F0"
+    GRAY     = "#64748B"
+    BORDER   = "#2D3148"
+
+    # ── KPIs base
+    total   = len(df)
+    n_pel   = len(df[df["type_label"] == "Película"])
+    n_ser   = len(df[df["type_label"] == "Serie"])
+    pct_pel = n_pel / total * 100 if total > 0 else 0
+    pct_ser = n_ser / total * 100 if total > 0 else 0
+    n_paises = int(df["country"].dropna().str.split(", ").explode().nunique())
+    n_idiomas = int(df["language"].nunique())
+    pop_avg  = df["popularity"].mean() if total > 0 else 0
+    val_avg  = df["vote_average"].mean() if total > 0 else 0
+
+    # País #1
+    paises_exploded = df["country"].dropna().str.split(", ").explode()
+    pais_top = paises_exploded.value_counts().index[0] if len(paises_exploded) > 0 else "N/D"
+
+    # Año pico
+    evol = df.groupby("year_added").size()
+    anio_pico = int(evol.idxmax()) if len(evol) > 0 else y0
+
+    # Top 5 géneros
+    rows_g = []
+    for _, row in df.dropna(subset=["genres"]).iterrows():
+        for g in row["genres"].split(", "):
+            rows_g.append(g)
+    from collections import Counter
+    generos_cnt = Counter(rows_g)
+    top5_gen = [(g, c) for g, c in generos_cnt.most_common(5)]
+
+    # Top 5 países
+    top5_paises = paises_exploded.value_counts().head(5)
+
+    # Evolución temporal (todos los años del rango)
+    evol_full = df.groupby(["year_added", "type_label"]).size().reset_index(name="Cantidad")
+
+    # ── Figura principal
+    fig = plt.figure(figsize=(14, 9), facecolor=BG)
+
+    # Título principal
+    fig.text(0.5, 0.965, "StreamView Analytics", ha="center", va="top",
+             fontsize=22, fontweight="bold", color=WHITE, fontfamily="DejaVu Sans")
+
+    # Subtítulo con contexto de filtro
+    tipo_label = tipo if tipo and tipo != "Todos" else "Todo el catálogo"
+    fig.text(0.5, 0.935, f"Resumen del catálogo · {tipo_label} · {y0}–{y1}",
+             ha="center", va="top", fontsize=11, color=GRAY, fontfamily="DejaVu Sans")
+
+    # Línea divisora bajo título
+    ax_line = fig.add_axes([0.04, 0.915, 0.92, 0.002])
+    ax_line.set_facecolor(BORDER)
+    ax_line.set_xticks([]); ax_line.set_yticks([])
+    for sp in ax_line.spines.values(): sp.set_visible(False)
+
+    # ── FILA KPIs (4 tarjetas)
+    kpi_data = [
+        (f"{total:,}",    "Total títulos",       GOLD),
+        (f"{pct_pel:.0f}% / {pct_ser:.0f}%", "Películas / Series", ACCENT),
+        (f"{n_paises}",   "Países productores",  CYAN),
+        (f"{anio_pico}",  "Año pico",            "#10B981"),
+    ]
+    kpi_xs = [0.04, 0.27, 0.50, 0.73]
+    kpi_w  = 0.21
+    kpi_y  = 0.78
+    kpi_h  = 0.115
+
+    for (val, lab, col), x in zip(kpi_data, kpi_xs):
+        ax_k = fig.add_axes([x, kpi_y, kpi_w, kpi_h])
+        ax_k.set_facecolor(BG_CARD_)
+        ax_k.set_xlim(0, 1); ax_k.set_ylim(0, 1)
+        ax_k.set_xticks([]); ax_k.set_yticks([])
+        for sp in ax_k.spines.values():
+            sp.set_edgecolor(BORDER); sp.set_linewidth(1)
+        ax_k.text(0.5, 0.62, val, ha="center", va="center",
+                  fontsize=18, fontweight="bold", color=col, fontfamily="DejaVu Sans")
+        ax_k.text(0.5, 0.18, lab, ha="center", va="center",
+                  fontsize=9, color=GRAY, fontfamily="DejaVu Sans")
+
+    # ── FILA INFERIOR: 3 paneles
+    # Panel 1: Top 5 géneros
+    ax1 = fig.add_axes([0.04, 0.13, 0.28, 0.56])
+    ax1.set_facecolor(BG_CARD_)
+    for sp in ax1.spines.values(): sp.set_edgecolor(BORDER); sp.set_linewidth(1)
+
+    if top5_gen:
+        gen_names = [g for g, _ in reversed(top5_gen)]
+        gen_vals  = [c for _, c in reversed(top5_gen)]
+        max_val   = max(gen_vals) if gen_vals else 1
+        colors_bar = [GOLD if i == len(gen_vals)-1 else ACCENT + "AA" for i in range(len(gen_vals))]
+        bars = ax1.barh(gen_names, gen_vals, color=colors_bar, height=0.55, edgecolor="none")
+        for bar, val in zip(bars, gen_vals):
+            ax1.text(bar.get_width() + max_val * 0.02, bar.get_y() + bar.get_height()/2,
+                     f"{val:,}", va="center", fontsize=8.5, color=WHITE, fontfamily="DejaVu Sans")
+        ax1.set_xlim(0, max_val * 1.25)
+        ax1.tick_params(colors=GRAY, labelsize=8.5)
+        ax1.xaxis.set_visible(False)
+        ax1.set_facecolor(BG_CARD_)
+        for sp in ["top","right","bottom"]: ax1.spines[sp].set_visible(False)
+        ax1.spines["left"].set_edgecolor(BORDER)
+        ax1.tick_params(axis="y", colors=WHITE)
+
+    ax1.set_title("Top 5 géneros", fontsize=10, fontweight="bold",
+                  color=WHITE, pad=8, fontfamily="DejaVu Sans", loc="left")
+
+    # Panel 2: Evolución temporal
+    ax2 = fig.add_axes([0.375, 0.13, 0.30, 0.56])
+    ax2.set_facecolor(BG_CARD_)
+    for sp in ax2.spines.values(): sp.set_edgecolor(BORDER); sp.set_linewidth(1)
+
+    if len(evol_full) > 0:
+        for tipo_val, col in [("Película", ACCENT), ("Serie", CYAN)]:
+            d = evol_full[evol_full["type_label"] == tipo_val].sort_values("year_added")
+            if len(d) > 0:
+                ax2.plot(d["year_added"], d["Cantidad"], color=col,
+                         linewidth=2, marker="o", markersize=4, label=tipo_val)
+        # Marcar año pico
+        ax2.axvline(anio_pico, color=GOLD, linestyle="--", linewidth=1, alpha=0.7)
+        ax2.text(anio_pico + 0.15, ax2.get_ylim()[1] * 0.92 if ax2.get_ylim()[1] > 0 else 1,
+                 f"Pico {anio_pico}", fontsize=7.5, color=GOLD, fontfamily="DejaVu Sans")
+        ax2.legend(fontsize=8, labelcolor=GRAY, facecolor=BG_CARD_, edgecolor=BORDER,
+                   framealpha=0.7)
+        ax2.tick_params(colors=GRAY, labelsize=8)
+        ax2.set_facecolor(BG_CARD_)
+        ax2.spines["bottom"].set_edgecolor(BORDER)
+        ax2.spines["left"].set_edgecolor(BORDER)
+        for sp in ["top","right"]: ax2.spines[sp].set_visible(False)
+        ax2.tick_params(axis="x", colors=GRAY)
+        ax2.tick_params(axis="y", colors=GRAY)
+        ax2.yaxis.set_tick_params(labelcolor=GRAY)
+
+    ax2.set_title("Incorporaciones por año", fontsize=10, fontweight="bold",
+                  color=WHITE, pad=8, fontfamily="DejaVu Sans", loc="left")
+
+    # Panel 3: Top 5 países
+    ax3 = fig.add_axes([0.715, 0.13, 0.265, 0.56])
+    ax3.set_facecolor(BG_CARD_)
+    for sp in ax3.spines.values(): sp.set_edgecolor(BORDER); sp.set_linewidth(1)
+
+    if len(top5_paises) > 0:
+        p_names = list(reversed(top5_paises.index.tolist()))
+        p_vals  = list(reversed(top5_paises.values.tolist()))
+        max_p   = max(p_vals) if p_vals else 1
+        colors_p = [GOLD if i == len(p_vals)-1 else CYAN + "AA" for i in range(len(p_vals))]
+        bars3 = ax3.barh(p_names, p_vals, color=colors_p, height=0.55, edgecolor="none")
+        for bar, val in zip(bars3, p_vals):
+            ax3.text(bar.get_width() + max_p * 0.02, bar.get_y() + bar.get_height()/2,
+                     f"{val:,}", va="center", fontsize=8.5, color=WHITE, fontfamily="DejaVu Sans")
+        ax3.set_xlim(0, max_p * 1.28)
+        ax3.xaxis.set_visible(False)
+        ax3.set_facecolor(BG_CARD_)
+        for sp in ["top","right","bottom"]: ax3.spines[sp].set_visible(False)
+        ax3.spines["left"].set_edgecolor(BORDER)
+        ax3.tick_params(axis="y", colors=WHITE, labelsize=8.5)
+
+    ax3.set_title("Top 5 países", fontsize=10, fontweight="bold",
+                  color=WHITE, pad=8, fontfamily="DejaVu Sans", loc="left")
+
+    # ── Pie de página
+    fig.text(0.5, 0.025,
+             f"Fuente: TMDB · Dataset StreamView Analytics · ADY1104 Visualización de Datos · Duoc UC 2026",
+             ha="center", va="bottom", fontsize=8, color=GRAY, fontfamily="DejaVu Sans")
+
+    # ── Exportar a PNG en memoria
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
+                facecolor=BG, edgecolor="none")
+    plt.close(fig)
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("utf-8")
+
 
 # ── ESTILOS CSS GLOBALES ─────────────────────────────────────────
 external_css = [
@@ -265,8 +469,10 @@ app.layout = html.Div([
     dcc.Store(id="theme-mode", storage_type="local", data="system"),
     dcc.Store(id="theme-resolved", data="dark"),
 
+    # Componente de descarga — necesario para que dcc.Download funcione
+    dcc.Download(id="download-infografia"),
+
     sidebar,
-    # Contenido (margen izquierdo = ancho sidebar en desktop; sin margen en mobile, ver assets/responsive.css)
     html.Div([
         # Header
         html.Div([
@@ -278,7 +484,28 @@ app.layout = html.Div([
                     "fontSize":"11px","color":C_MUTED
                 }),
             ]),
-            html.Button("Auto", id="theme-toggle-btn", n_clicks=0, className="sv-theme-toggle"),
+            # Botones de acción: tema + descarga infografía
+            html.Div([
+                html.Button("Auto", id="theme-toggle-btn", n_clicks=0, className="sv-theme-toggle"),
+                html.Button(
+                    "⬇ Descargar resumen",
+                    id="btn-descargar-infografia",
+                    n_clicks=0,
+                    style={
+                        "fontSize":"11px",
+                        "fontWeight":"600",
+                        "color":"#E2E8F0",
+                        "backgroundColor":"#7C3AED",
+                        "border":"none",
+                        "borderRadius":"8px",
+                        "padding":"7px 14px",
+                        "cursor":"pointer",
+                        "marginLeft":"10px",
+                        "letterSpacing":"0.2px",
+                        "transition":"opacity 0.15s",
+                    }
+                ),
+            ], style={"display":"flex","alignItems":"center"}),
         ], className="sv-header", style={
             "padding":"20px 24px 16px",
             "borderBottom":f"1px solid {C_BORDER}",
@@ -298,10 +525,6 @@ app.layout = html.Div([
 
 
 # ── TEMA (claro / oscuro / automático) ──────────────────────────
-# theme-mode: elección del usuario ("light" | "dark" | "system"), persistida en localStorage.
-# theme-resolved: valor real aplicado ("light" | "dark"); lo usan los callbacks de Python
-# para colorear los gráficos de Plotly (que no pueden leer variables CSS).
-
 app.clientside_callback(
     """
     function(n_clicks, mode) {
@@ -346,7 +569,6 @@ app.clientside_callback(
     prevent_initial_call=True,
 )
 def toggle_mobile_menu(n_clicks, tab):
-    # En móvil, el botón abre/cierra el menú; elegir una vista lo cierra.
     if ctx.triggered_id == "nav-tab":
         return "sv-sidebar-body", "Menú"
     if n_clicks % 2 == 1:
@@ -400,6 +622,30 @@ def update_kpis(tipo, years):
     return dbc.Row(cols, className="g-2")
 
 
+# ── CALLBACK: DESCARGA INFOGRAFÍA ────────────────────────────────
+@app.callback(
+    Output("download-infografia", "data"),
+    Input("btn-descargar-infografia", "n_clicks"),
+    State("filtro-tipo", "value"),
+    State("filtro-years", "value"),
+    prevent_initial_call=True,
+)
+def descargar_infografia(n_clicks, tipo, year_range):
+    """
+    Al hacer click en el botón, genera la infografía con los filtros
+    activos en ese momento y la envía como PNG al browser.
+    """
+    png_b64 = generar_infografia_png(tipo, year_range)
+    png_bytes = base64.b64decode(png_b64)
+
+    tipo_label = tipo.lower().replace("é","e").replace("í","i") if tipo and tipo != "Todos" else "catalogo"
+    y0 = int(year_range[0]) if year_range else YEAR_MIN
+    y1 = int(year_range[1]) if year_range else YEAR_MAX
+    filename = f"streamview_resumen_{tipo_label}_{y0}_{y1}.png"
+
+    return dcc.send_bytes(png_bytes, filename)
+
+
 @app.callback(
     Output("tab-content","children"),
     Input("nav-tab","value"),
@@ -411,15 +657,12 @@ def update_kpis(tipo, years):
 def render_tab(tab, tipo, years, top_n, theme):
     df = filtrar(tipo, years)
 
-    # Colores de gráfico según el tema resuelto (claro/oscuro) — Plotly
-    # necesita valores hex literales, no puede leer variables CSS.
     tc = CHART_THEMES.get(theme, CHART_THEMES["dark"])
     BG_CHART, C_TEXT, C_MUTED, C_BORDER = tc["bg"], tc["text"], tc["muted"], tc["border"]
 
     # ══ CATÁLOGO ══════════════════════════════════════════════════
     if tab == "tab-catalogo":
 
-        # Películas vs Series
         counts = df["type_label"].value_counts().reset_index()
         counts.columns = ["Tipo","Cantidad"]
         counts["Pct"] = (counts["Cantidad"]/counts["Cantidad"].sum()*100).round(1)
@@ -446,7 +689,6 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay["xaxis"]["showgrid"] = False
         fig_tipo.update_layout(**lay, xaxis_range=[0, counts["Cantidad"].max()*1.22])
 
-        # Géneros
         rows_g = []
         for _, row in df.dropna(subset=["genres"]).iterrows():
             for g in row["genres"].split(", "):
@@ -477,7 +719,6 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay2["margin"] = dict(l=8, r=60, t=44, b=8)
         fig_gen.update_layout(**lay2, xaxis_range=[0, top_g["Cantidad"].max()*1.18])
 
-        # Calificaciones en rangos
         rc = df.groupby(["rating_bin","type_label"], observed=True).size().reset_index(name="Cantidad")
         fig_rat = go.Figure()
         for tipo_val, color in [("Película", C_MOVIE), ("Serie", C_SHOW)]:
@@ -576,10 +817,6 @@ def render_tab(tab, tipo, years, top_n, theme):
     # ══ POPULARIDAD ═══════════════════════════════════════════════
     elif tab == "tab-pop":
 
-        # ── HALLAZGO PRINCIPAL: ¿el género que más se produce es el más popular? ──
-        # Gráfico de pendientes (bump chart): compara, para cada género, su
-        # ranking por volumen de producción vs. su ranking por popularidad
-        # promedio, en una sola vista — sin tener que cruzar pestañas.
         rows_g_pop = []
         for _, row in df.dropna(subset=["genres"]).iterrows():
             for g in row["genres"].split(", "):
@@ -606,8 +843,6 @@ def render_tab(tab, tipo, years, top_n, theme):
                 color_line = C_HIGHLIGHT if es_lider else C_MUTED
                 width_line = 4 if es_lider else 1.5
                 op = 0.95 if es_lider else 0.45
-                # Solo el líder lleva texto en ambos extremos; el resto solo
-                # se identifica al inicio (izquierda), con detalle vía hover.
                 if es_lider:
                     texto = [f"#{int(r['rank_vol'])} {r['Género']}", f"#{int(r['rank_pop'])}"]
                     pos_texto = ["middle left", "middle right"]
@@ -689,7 +924,6 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay_sc["yaxis"]["range"] = [0, 10.5]
         fig_sc.update_layout(**lay_sc)
 
-        # Top popularidad por formato (top_n películas + top_n series, no un ranking mixto)
         top_pop_movies = df[(df["vote_average"]>0) & (df["type_label"]=="Película")].nlargest(top_n,"popularity")[
             ["title","popularity","vote_average","type_label"]
         ]
@@ -714,7 +948,6 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay_pop["xaxis"]["showgrid"] = False
         fig_pop.update_layout(**lay_pop)
 
-        # Popularidad por género
         rows_pg = []
         for _, row in df.dropna(subset=["genres"]).iterrows():
             for g in row["genres"].split(", "):
@@ -752,7 +985,6 @@ def render_tab(tab, tipo, years, top_n, theme):
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )
 
-        # Calificación promedio por país (mín. 30 títulos)
         rows_cp = []
         for _, row in df.dropna(subset=["country"]).iterrows():
             for c in row["country"].split(", "):
