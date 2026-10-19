@@ -312,7 +312,7 @@ def generar_infografia_png(tipo, year_range, top_n=5):
             # ── Nombre
             ax.text(0.175, yc + 0.025, nombre,
                     ha="left", va="center",
-                    fontsize=9 if rank == 1 else 8.5,
+                    fontsize=9 if rank == 1 else 10.5,
                     fontweight="bold" if rank == 1 else "normal",
                     color=TEXT if rank == 1 else TEXT2,
                     fontfamily="DejaVu Sans", transform=ax.transAxes)
