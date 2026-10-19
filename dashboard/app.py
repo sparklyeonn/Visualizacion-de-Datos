@@ -1,6 +1,6 @@
 """
 STREAMVIEW ANALYTICS | DASHBOARD INTERACTIVO
-Diseño Visualización de Datos | ADY1104 Duoc UC 2026
+Diseño Visualizacion de Datos | ADY1104 Duoc UC 2026
 """
 
 import os, warnings, io, base64
@@ -984,21 +984,16 @@ def render_tab(tab, tipo, years, top_n, theme):
                 df_plot = df_plot.sort_values("PopProm", ascending=False).head(top_n)
                 df_plot = df_plot.sort_values("PopProm")  # ascendente para barras horizontales
 
-                # Paleta por género dominante
-                generos_uniq = df_plot["Género"].unique().tolist()
-                palette = [C_ACCENT1, C_ACCENT2, C_ACCENT4, C_ACCENT5,
-                           C_HIGHLIGHT, "#F472B6", "#34D399", "#FB923C"]
-                color_map = {g: palette[i % len(palette)]
-                             for i, g in enumerate(generos_uniq)}
-
-                bar_colors = df_plot["Género"].map(color_map).tolist()
-
                 fig_gen_pais.add_trace(go.Bar(
                     x=df_plot["PopProm"],
                     y=df_plot["País"],
                     orientation="h",
-                    marker=dict(color=bar_colors, opacity=0.88,
-                                line=dict(color="rgba(0,0,0,0)")),
+                    marker=dict(
+                        color=df_plot["PopProm"],
+                        colorscale=[[0, "rgba(245,166,35,0.35)"], [1, C_HIGHLIGHT]],
+                        showscale=False,
+                        line=dict(color="rgba(0,0,0,0)"),
+                    ),
                     text=[f"{g}  ·  {v:.1f}"
                           for g, v in zip(df_plot["Género"], df_plot["PopProm"])],
                     textposition="outside",
@@ -1006,42 +1001,23 @@ def render_tab(tab, tipo, years, top_n, theme):
                     hovertemplate=(
                         "<b>%{y}</b><br>"
                         "Popularidad promedio: %{x:.1f}<br>"
-                        "Género dominante: %{text}<extra></extra>"
+                        "Género dominante: %{customdata}<extra></extra>"
                     ),
                     customdata=df_plot["Género"],
                 ))
 
-                # Leyenda manual como anotaciones de color
                 lay_gp = base_layout(
-                    f"Popularidad promedio por país — top {top_n} · color = género dominante",
+                    f"Popularidad promedio por país — top {top_n}",
                     bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER
                 )
                 lay_gp["xaxis"]["title"] = "Popularidad promedio (todos los títulos del país)"
                 lay_gp["yaxis"]["title"] = ""
                 lay_gp["xaxis"]["showgrid"] = True
                 lay_gp["margin"] = dict(l=8, r=100, t=48, b=8)
+                lay_gp["showlegend"] = False
                 max_pop = df_plot["PopProm"].max() if len(df_plot) > 0 else 1
                 fig_gen_pais.update_layout(**lay_gp,
                                            xaxis_range=[0, max_pop * 1.28])
-
-                # Añadir leyenda de géneros como trazas fantasma
-                for genero in generos_uniq:
-                    fig_gen_pais.add_trace(go.Bar(
-                        x=[None], y=[None],
-                        name=genero,
-                        marker=dict(color=color_map[genero], opacity=0.88),
-                        showlegend=True,
-                    ))
-                fig_gen_pais.update_layout(
-                    legend=dict(
-                        orientation="h", yanchor="bottom", y=1.01,
-                        xanchor="left", x=0,
-                        font=dict(color=C_TEXT, size=9),
-                        bgcolor="rgba(0,0,0,0)",
-                        title=dict(text="Género dominante  ", font=dict(size=9, color=C_MUTED)),
-                    ),
-                    barmode="overlay",
-                )
             else:
                 lay_gp = base_layout("Popularidad promedio por país",
                                      bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
