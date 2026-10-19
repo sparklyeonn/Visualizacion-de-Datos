@@ -381,12 +381,12 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     ax_gp = fig.add_subplot(gs[2, 0])
     ax_gc = fig.add_subplot(gs[2, 1])
 
-    ranking_card(ax_gp, top5_gen_pop, ACCENT,
-                 "TOP GÉNEROS · POPULARIDAD",
-                 fmt_fn=lambda v: f"{v:.1f}")
-    ranking_card(ax_gc, top5_gen_cat, TEAL,
+    ranking_card(ax_gp, top5_gen_cat, TEAL,
                  "TOP GÉNEROS · CATÁLOGO",
                  fmt_fn=lambda v: f"{int(v):,}")
+    ranking_card(ax_gc, top5_gen_pop, ACCENT,
+                 "TOP GÉNEROS · POPULARIDAD",
+                 fmt_fn=lambda v: f"{v:.1f}")
 
     # ── ROW 3: Países (2×1) ──────────────────────────────────────────
     ax_pp   = fig.add_subplot(gs[3, 0])
