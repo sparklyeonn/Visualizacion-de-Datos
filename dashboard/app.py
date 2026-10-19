@@ -1,6 +1,6 @@
 """
 STREAMVIEW ANALYTICS | DASHBOARD INTERACTIVO
-Diseño Visualización de Datos | ADY1104 Duoc UC 2026
+Diseño Visualizacion de Datos | ADY1104 Duoc UC 2026
 """
 
 import os, warnings, io, base64
@@ -17,7 +17,7 @@ import dash_bootstrap_components as dbc
 
 warnings.filterwarnings("ignore")
 
-# COLORES DE INTERFAZ (chrome) 
+# ── COLORES DE INTERFAZ (chrome) ────────────────────────────────
 BG_MAIN              = "var(--bg-page)"
 BG_CARD              = "var(--bg-card)"
 BG_SIDEBAR           = "var(--bg-sidebar)"
@@ -28,7 +28,7 @@ C_MUTED_SIDEBAR      = "var(--text-muted-on-sidebar)"
 C_BORDER             = "var(--border-color)"
 C_ACCENT_PRIMARY     = "var(--accent-primary)"
 
-# COLORES DE GRÁFICOS (Plotly) 
+# ── COLORES DE GRÁFICOS (Plotly) ────────────────────────────────
 CHART_THEMES = {
     "dark":  dict(bg="#1A1D27", text="#E2E8F0", muted="#64748B", border="#2D3148"),
     "light": dict(bg="#FFFFFF", text="#0F172A", muted="#64748B", border="#E2E8F0"),
@@ -47,17 +47,12 @@ C_HIGHLIGHT = "#F5A623"
 FONT = "Inter, system-ui, sans-serif"
 
 LANG_MAP = {
-    "en":"Inglés","fr":"Francés",
-    "ja":"Japonés","ko":"Coreano",
-    "es":"Español","zh":"Chino",
-    "it":"Italiano","hi":"Hindi",
-    "de":"Alemán","ru":"Ruso",
-    "tl":"Filipino","ar":"Árabe",
-    "pt":"Portugués","nl":"Holandés",
-    "tr":"Turco"
+    "en":"Inglés","fr":"Francés","ja":"Japonés","ko":"Coreano","es":"Español",
+    "zh":"Chino","it":"Italiano","hi":"Hindi","de":"Alemán","ru":"Ruso",
+    "tl":"Filipino","ar":"Árabe","pt":"Portugués","nl":"Holandés","tr":"Turco"
 }
 
-# CARGA 
+# ── CARGA ────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
@@ -84,7 +79,7 @@ combined = pd.concat([movies[COMMON], shows[COMMON]], ignore_index=True)
 YEAR_MIN = int(combined["year_added"].min())
 YEAR_MAX = int(combined["year_added"].max())
 
-# HELPERS
+# ── HELPERS ──────────────────────────────────────────────────────
 def filtrar(tipo="Todos", year_range=None):
     df = combined.copy()
     if tipo and tipo != "Todos":
@@ -153,279 +148,385 @@ def kpi_card(label, value, subtitle="", color=C_ACCENT1, icon=""):
 # ══════════════════════════════════════════════════════════════════
 # GENERADOR DE INFOGRAFÍA
 # ══════════════════════════════════════════════════════════════════
-def generar_infografia_png(tipo, year_range):
+def generar_infografia_png(tipo, year_range, top_n=5):
     """
-    Infografía vertical estilo poster: fondo negro, tipografía bold impactante,
-    tarjetas de stats, lista de pasos con timeline, donut chart.
-    Formato: 800×1400 px a 100 dpi → 8×14 pulgadas.
+    Infografía vertical: fondo blanco, paleta coherente con el dashboard,
+    KPIs de total/películas/series, 4 rankings top-5, calificación promedio.
+    Formato: 9×18 pulgadas a 120 dpi → ~1080×2160 px.
     """
     from collections import Counter
-    import matplotlib.patches as mpatches
-    from matplotlib.patches import FancyBboxPatch, Circle, FancyArrowPatch
-    import matplotlib.patheffects as pe
+    from matplotlib.patches import Circle
+    from matplotlib.gridspec import GridSpec
+
+    TOP = min(int(top_n) if top_n else 5, 5)   # siempre top-5 en la infografía
 
     df = filtrar(tipo, year_range)
     y0 = int(year_range[0]) if year_range else YEAR_MIN
     y1 = int(year_range[1]) if year_range else YEAR_MAX
 
-    # Paleta (inspirada en imagen de referencia)
-    BG       = "#000000"
-    BG_CARD_ = "#111111"
-    BG_CARD2 = "#1A1A2E"
-    BLUE     = "#4169E1"   # azul eléctrico (accent principal)
-    BLUE2    = "#5B7FFF"   # azul más claro para textos grandes
-    WHITE    = "#FFFFFF"
-    GRAY     = "#888888"
-    DARK_G   = "#333333"
-    BORDER_C = "#222244"
+    # ── Paleta: coherente con el dashboard (fondo blanco)
+    BG        = "#FFFFFF"
+    BG_CARD   = "#F8F9FB"
+    BG_CARD_H = "#EEF2FF"      # card destacada (azul muy suave)
+    ACCENT    = "#7C3AED"      # violeta principal (C_ACCENT1 del dashboard)
+    TEAL      = "#06B6D4"      # C_ACCENT2
+    GREEN     = "#10B981"      # C_ACCENT4
+    BLUE      = "#3B82F6"      # C_ACCENT5
+    TEXT      = "#0F172A"      # texto principal
+    TEXT2     = "#334155"      # texto secundario
+    MUTED     = "#64748B"      # texto terciario
+    BORDER    = "#E2E8F0"      # bordes
+    BORDER_H  = "#C4B5FD"      # borde card destacada
 
-    # Datos
-    total    = len(df)
-    n_pel    = len(df[df["type_label"] == "Película"])
-    n_ser    = len(df[df["type_label"] == "Serie"])
-    pct_pel  = n_pel / total * 100 if total > 0 else 0
-    pct_ser  = n_ser / total * 100 if total > 0 else 0
+    tipo_label = tipo if tipo and tipo != "Todos" else "Catálogo completo"
 
-    paises_exploded = df["country"].dropna().str.split(", ").explode()
-    n_paises  = int(paises_exploded.nunique())
-    n_idiomas = int(df["language"].nunique())
-    val_avg   = df["vote_average"].mean() if total > 0 else 0
-    pop_avg   = df["popularity"].mean() if total > 0 else 0
+    # ── Datos base
+    total = len(df)
+    n_pel = int(len(df[df["type_label"] == "Película"]))
+    n_ser = int(len(df[df["type_label"] == "Serie"]))
+    val_avg = df["vote_average"].mean() if total > 0 else 0
 
+    # Subtítulo dinámico según tipo seleccionado
+    if tipo == "Película":
+        kpi_sub = f"{n_pel:,} películas"
+    elif tipo == "Serie":
+        kpi_sub = f"{n_ser:,} series"
+    else:
+        kpi_sub = f"{n_pel:,} películas  ·  {n_ser:,} series"
+
+    # ── Géneros por presencia en catálogo (top 5)
     rows_g = []
     for _, row in df.dropna(subset=["genres"]).iterrows():
         for g in row["genres"].split(", "):
             rows_g.append(g)
     generos_cnt = Counter(rows_g)
-    top5_gen = generos_cnt.most_common(5)
+    top5_gen_cat = generos_cnt.most_common(TOP)  # (género, cantidad)
 
-    top3_paises = paises_exploded.value_counts().head(3)
+    # ── Géneros por popularidad (top 5)
+    rows_gp = []
+    for _, row in df.dropna(subset=["genres"]).iterrows():
+        for g in row["genres"].split(", "):
+            rows_gp.append({"Género": g, "pop": row["popularity"]})
+    gpdf = pd.DataFrame(rows_gp) if rows_gp else pd.DataFrame(columns=["Género", "pop"])
+    if len(gpdf) > 0:
+        top5_gen_pop = (
+            gpdf.groupby("Género")["pop"].mean()
+            .nlargest(TOP)
+            .reset_index()
+            .values.tolist()
+        )  # [[género, pop], ...]
+    else:
+        top5_gen_pop = []
 
-    # Canvas vertical
-    fig = plt.figure(figsize=(8, 14), facecolor=BG)
+    # ── Países por producción (top 5)
+    paises_s = df["country"].dropna().str.split(", ").explode().str.strip()
+    top5_paises_prod = paises_s.value_counts().head(TOP)
+
+    # ── Países por popularidad (top 5, mín 5 títulos)
+    rows_cp = []
+    for _, row in df.dropna(subset=["country"]).iterrows():
+        for c in row["country"].split(", "):
+            rows_cp.append({"País": c.strip(), "pop": row["popularity"]})
+    cpdf = pd.DataFrame(rows_cp) if rows_cp else pd.DataFrame(columns=["País", "pop"])
+    if len(cpdf) > 0:
+        cp_stats = cpdf.groupby("País")["pop"].agg(["mean", "count"]).reset_index()
+        cp_stats = cp_stats[cp_stats["count"] >= 5]
+        top5_paises_pop = (
+            cp_stats.nlargest(TOP, "mean")[["País", "mean"]]
+            .values.tolist()
+        )  # [[país, pop_mean], ...]
+    else:
+        top5_paises_pop = []
+
+    # ── Canvas
+    fig = plt.figure(figsize=(9, 18), facecolor=BG)
     fig.patch.set_facecolor(BG)
 
-    # Usamos un GridSpec para organizar secciones
-    from matplotlib.gridspec import GridSpec
     gs = GridSpec(
-        7, 2,
+        9, 2,
         figure=fig,
-        left=0.06, right=0.94,
-        top=0.97, bottom=0.03,
-        hspace=0.55, wspace=0.18,
-        height_ratios=[0.9, 1.5, 1.5, 1.5, 1.8, 1.8, 0.5]
+        left=0.05, right=0.95,
+        top=0.975, bottom=0.02,
+        hspace=0.55, wspace=0.20,
+        height_ratios=[0.7, 1.1, 1.1, 0.15, 1.9, 1.9, 0.15, 1.9, 0.45]
     )
 
-    tipo_label = tipo if tipo and tipo != "Todos" else "Catálogo completo"
-
-    # ══ SECCIÓN 0: TÍTULO ══════════════════════════════════════════
-    ax_title = fig.add_subplot(gs[0, :])
-    ax_title.set_facecolor(BG)
-    ax_title.set_xlim(0, 1); ax_title.set_ylim(0, 1)
-    ax_title.axis("off")
-
-    ax_title.text(0.0, 0.98, "VISUALIZACIÓN DE DATOS",
-                  ha="left", va="top", fontsize=8.5, fontweight="bold",
-                  color=WHITE, fontfamily="DejaVu Sans", transform=ax_title.transAxes)
-    ax_title.text(0.0, 0.60, "STREAMVIEW",
-                  ha="left", va="top", fontsize=26, fontweight="bold",
-                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_title.transAxes)
-    ax_title.text(0.0, 0.08, "ANALYTICS",
-                  ha="left", va="top", fontsize=26, fontweight="bold",
-                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_title.transAxes)
-    ax_title.text(1.0, 0.98, f"{tipo_label}  ·  {y0}–{y1}",
-                  ha="right", va="top", fontsize=7.5,
-                  color=GRAY, fontfamily="DejaVu Sans", transform=ax_title.transAxes)
-
-    # ══ SECCIÓN 1–2: TARJETAS DE STATS (2×2) ═══════════════════════
-    stat_cards = [
-        (f"{pct_pel:.0f}%",  "DE CONTENIDO\nSON PELÍCULAS",  gs[1, 0]),
-        (f"{pct_ser:.0f}%",  "DE CONTENIDO\nSON SERIES",     gs[1, 1]),
-        (f"{n_paises}",      "PAÍSES\nPRODUCTORES",           gs[2, 0]),
-        (f"{n_idiomas}",     "IDIOMAS\nDISPONIBLES",          gs[2, 1]),
-    ]
-
-    for val_txt, label_txt, gspec in stat_cards:
-        ax_s = fig.add_subplot(gspec)
-        ax_s.set_facecolor(BG_CARD_)
-        ax_s.set_xlim(0, 1); ax_s.set_ylim(0, 1)
-        ax_s.axis("off")
-        # Borde azul sutil
-        for sp in ax_s.spines.values():
+    # ── helper: dibujar una tarjeta de fondo
+    def draw_card(ax, color_bg=BG_CARD, color_border=BORDER):
+        ax.set_facecolor(color_bg)
+        for sp in ax.spines.values():
             sp.set_visible(True)
-            sp.set_edgecolor(BORDER_C)
-            sp.set_linewidth(1.5)
-        ax_s.text(0.5, 0.72, val_txt,
-                  ha="center", va="center", fontsize=34, fontweight="bold",
-                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_s.transAxes)
-        ax_s.text(0.5, 0.22, label_txt,
-                  ha="center", va="center", fontsize=7.5, fontweight="bold",
-                  color=GRAY, fontfamily="DejaVu Sans", transform=ax_s.transAxes,
-                  linespacing=1.4)
+            sp.set_edgecolor(color_border)
+            sp.set_linewidth(1.2)
 
-    # ══ SECCIÓN 3: TARJETA FULL-WIDTH — Total títulos ══════════════
-    ax_total = fig.add_subplot(gs[3, :])
-    ax_total.set_facecolor(BG_CARD2)
-    ax_total.set_xlim(0, 1); ax_total.set_ylim(0, 1)
-    ax_total.axis("off")
-    for sp in ax_total.spines.values():
-        sp.set_visible(True); sp.set_edgecolor(BLUE); sp.set_linewidth(1.5)
+    # ── helper: lista con bullets numerados
+    def draw_ranked_list(ax, items, col_num=ACCENT, col_txt=TEXT, col_sub=MUTED,
+                         label_fn=None, sub_fn=None, top_offset=0.87, step=0.17):
+        ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+        ax.axis("off")
+        n = len(items)
+        for i, item in enumerate(items):
+            yp = top_offset - i * step
+            is_first = (i == 0)
+            # Círculo numerado
+            circ = Circle((0.045, yp), 0.038,
+                           transform=ax.transAxes,
+                           facecolor=col_num if is_first else "#E2E8F0",
+                           edgecolor=col_num, linewidth=1.2, zorder=3)
+            ax.add_patch(circ)
+            ax.text(0.045, yp, str(i + 1),
+                    ha="center", va="center", fontsize=7.5, fontweight="bold",
+                    color="white" if is_first else MUTED,
+                    fontfamily="DejaVu Sans", transform=ax.transAxes, zorder=4)
+            # Línea conectora
+            if i < n - 1:
+                ax.plot([0.045, 0.045], [yp - step + 0.045, yp - 0.042],
+                        color=col_num, linewidth=0.8, alpha=0.35,
+                        transform=ax.transAxes, zorder=2)
+            # Texto principal
+            label = label_fn(item) if label_fn else str(item)
+            sub   = sub_fn(item) if sub_fn else ""
+            ax.text(0.12, yp + 0.025, label,
+                    ha="left", va="center", fontsize=9 if is_first else 8.5,
+                    fontweight="bold" if is_first else "normal",
+                    color=TEXT if is_first else TEXT2,
+                    fontfamily="DejaVu Sans", transform=ax.transAxes)
+            if sub:
+                ax.text(0.12, yp - 0.045, sub,
+                        ha="left", va="center", fontsize=7.5,
+                        color=MUTED, fontfamily="DejaVu Sans", transform=ax.transAxes)
 
-    ax_total.text(0.5, 0.72, f"{total:,}",
-                  ha="center", va="center", fontsize=44, fontweight="bold",
-                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_total.transAxes)
-    ax_total.text(0.5, 0.22, "TÍTULOS EN EL CATÁLOGO FILTRADO",
-                  ha="center", va="center", fontsize=9, fontweight="bold",
-                  color=WHITE, fontfamily="DejaVu Sans", transform=ax_total.transAxes)
+    # ══════════════════════════════════════════════════════════════
+    # SECCIÓN 0 — CABECERA
+    # ══════════════════════════════════════════════════════════════
+    ax_h = fig.add_subplot(gs[0, :])
+    ax_h.set_facecolor(BG)
+    ax_h.set_xlim(0, 1); ax_h.set_ylim(0, 1)
+    ax_h.axis("off")
 
-    # ══ SECCIÓN 4: TOP GÉNEROS (lista con bullets) ════════════════
-    ax_gen = fig.add_subplot(gs[4, 0])
-    ax_gen.set_facecolor(BG)
-    ax_gen.set_xlim(0, 1); ax_gen.set_ylim(0, 1)
-    ax_gen.axis("off")
+    ax_h.text(0.0, 0.95, "STREAMVIEW ANALYTICS",
+              ha="left", va="top", fontsize=22, fontweight="bold",
+              color=ACCENT, fontfamily="DejaVu Sans", transform=ax_h.transAxes)
+    ax_h.text(0.0, 0.38, "Resumen del catálogo",
+              ha="left", va="top", fontsize=11, color=TEXT2,
+              fontfamily="DejaVu Sans", transform=ax_h.transAxes)
+    ax_h.text(1.0, 0.95, f"{tipo_label}  ·  {y0}–{y1}",
+              ha="right", va="top", fontsize=8.5, color=MUTED,
+              fontfamily="DejaVu Sans", transform=ax_h.transAxes)
+    # Línea divisora
+    ax_h.axhline(0.0, color=BORDER, linewidth=1.5, xmin=0, xmax=1)
 
-    ax_gen.text(0.0, 0.97, "TOP GÉNEROS",
-                ha="left", va="top", fontsize=9, fontweight="bold",
-                color=BLUE2, fontfamily="DejaVu Sans", transform=ax_gen.transAxes)
+    # ══════════════════════════════════════════════════════════════
+    # SECCIÓN 1 — KPI TOTAL (tarjeta full-width destacada)
+    # ══════════════════════════════════════════════════════════════
+    ax_tot = fig.add_subplot(gs[1, :])
+    draw_card(ax_tot, BG_CARD_H, BORDER_H)
+    ax_tot.set_xlim(0, 1); ax_tot.set_ylim(0, 1)
+    ax_tot.axis("off")
 
-    # Línea separadora
-    ax_gen.axhline(0.90, color=BLUE, linewidth=1, xmin=0, xmax=1)
+    ax_tot.text(0.5, 0.74, f"{total:,}",
+                ha="center", va="center", fontsize=52, fontweight="bold",
+                color=ACCENT, fontfamily="DejaVu Sans", transform=ax_tot.transAxes)
+    ax_tot.text(0.5, 0.25, "TÍTULOS EN EL CATÁLOGO",
+                ha="center", va="center", fontsize=10, fontweight="bold",
+                color=TEXT2, fontfamily="DejaVu Sans", transform=ax_tot.transAxes)
 
-    n_show = min(5, len(top5_gen))
-    y_positions = [0.78 - i * 0.165 for i in range(n_show)]
-    for i, ((gen, cnt), yp) in enumerate(zip(top5_gen, y_positions)):
-        # Bullet circle
-        circ = Circle((0.05, yp + 0.03), 0.045,
-                       transform=ax_gen.transAxes,
-                       facecolor=BLUE if i == 0 else DARK_G,
-                       edgecolor=BLUE, linewidth=1.2, zorder=3)
-        ax_gen.add_patch(circ)
-        ax_gen.text(0.05, yp + 0.03, str(i + 1),
-                    ha="center", va="center", fontsize=7, fontweight="bold",
-                    color=WHITE, fontfamily="DejaVu Sans",
-                    transform=ax_gen.transAxes, zorder=4)
-        # Línea conectora vertical (excepto último)
-        if i < n_show - 1:
-            ax_gen.plot([0.05, 0.05], [yp - 0.065, yp - 0.01],
-                        color=BLUE, linewidth=1,
-                        transform=ax_gen.transAxes, zorder=2, alpha=0.5)
-        # Texto
-        ax_gen.text(0.16, yp + 0.05, gen,
-                    ha="left", va="center", fontsize=8.5, fontweight="bold",
-                    color=WHITE, fontfamily="DejaVu Sans", transform=ax_gen.transAxes)
-        ax_gen.text(0.16, yp - 0.03, f"{cnt:,} títulos",
-                    ha="left", va="center", fontsize=7,
-                    color=GRAY, fontfamily="DejaVu Sans", transform=ax_gen.transAxes)
+    # ══════════════════════════════════════════════════════════════
+    # SECCIÓN 2 — KPI desglose películas / series
+    # ══════════════════════════════════════════════════════════════
+    # Construir tarjetas según tipo seleccionado
+    if tipo == "Película":
+        kpi_cards_data = [
+            (f"{n_pel:,}", "PELÍCULAS", C_MOVIE, 1.0),
+        ]
+        # Una sola tarjeta ancha + calificación
+        ax_k1 = fig.add_subplot(gs[2, 0])
+        draw_card(ax_k1, BG_CARD, BORDER)
+        ax_k1.set_xlim(0, 1); ax_k1.set_ylim(0, 1); ax_k1.axis("off")
+        ax_k1.text(0.5, 0.70, f"{n_pel:,}", ha="center", va="center",
+                   fontsize=36, fontweight="bold", color=C_MOVIE,
+                   fontfamily="DejaVu Sans", transform=ax_k1.transAxes)
+        ax_k1.text(0.5, 0.24, "PELÍCULAS", ha="center", va="center",
+                   fontsize=9, fontweight="bold", color=MUTED,
+                   fontfamily="DejaVu Sans", transform=ax_k1.transAxes)
+    elif tipo == "Serie":
+        ax_k1 = fig.add_subplot(gs[2, 0])
+        draw_card(ax_k1, BG_CARD, BORDER)
+        ax_k1.set_xlim(0, 1); ax_k1.set_ylim(0, 1); ax_k1.axis("off")
+        ax_k1.text(0.5, 0.70, f"{n_ser:,}", ha="center", va="center",
+                   fontsize=36, fontweight="bold", color=C_SHOW,
+                   fontfamily="DejaVu Sans", transform=ax_k1.transAxes)
+        ax_k1.text(0.5, 0.24, "SERIES", ha="center", va="center",
+                   fontsize=9, fontweight="bold", color=MUTED,
+                   fontfamily="DejaVu Sans", transform=ax_k1.transAxes)
+    else:
+        # Ambos tipos: dos tarjetas
+        ax_k1 = fig.add_subplot(gs[2, 0])
+        draw_card(ax_k1, BG_CARD, BORDER)
+        ax_k1.set_xlim(0, 1); ax_k1.set_ylim(0, 1); ax_k1.axis("off")
+        ax_k1.text(0.5, 0.70, f"{n_pel:,}", ha="center", va="center",
+                   fontsize=36, fontweight="bold", color=C_MOVIE,
+                   fontfamily="DejaVu Sans", transform=ax_k1.transAxes)
+        ax_k1.text(0.5, 0.24, "PELÍCULAS", ha="center", va="center",
+                   fontsize=9, fontweight="bold", color=MUTED,
+                   fontfamily="DejaVu Sans", transform=ax_k1.transAxes)
 
-    # ══ SECCIÓN 4: DONUT — Películas vs Series ════════════════════
-    ax_donut = fig.add_subplot(gs[4, 1])
-    ax_donut.set_facecolor(BG)
-    ax_donut.axis("off")
+    ax_k2 = fig.add_subplot(gs[2, 1])
+    draw_card(ax_k2, BG_CARD, BORDER)
+    ax_k2.set_xlim(0, 1); ax_k2.set_ylim(0, 1); ax_k2.axis("off")
+    val_fmt = f"{val_avg:.1f}"
+    ax_k2.text(0.5, 0.68, val_fmt, ha="center", va="center",
+               fontsize=36, fontweight="bold", color=GREEN,
+               fontfamily="DejaVu Sans", transform=ax_k2.transAxes)
+    ax_k2.text(0.5, 0.40, "/ 10", ha="center", va="center",
+               fontsize=11, color=MUTED,
+               fontfamily="DejaVu Sans", transform=ax_k2.transAxes)
+    ax_k2.text(0.5, 0.18, "CALIFICACIÓN PROMEDIO", ha="center", va="center",
+               fontsize=9, fontweight="bold", color=MUTED,
+               fontfamily="DejaVu Sans", transform=ax_k2.transAxes)
 
-    ax_donut.text(0.5, 0.97, "COMPOSICIÓN",
-                  ha="center", va="top", fontsize=9, fontweight="bold",
-                  color=BLUE2, fontfamily="DejaVu Sans", transform=ax_donut.transAxes)
+    # ══════════════════════════════════════════════════════════════
+    # SEPARADOR 1
+    # ══════════════════════════════════════════════════════════════
+    ax_sep1 = fig.add_subplot(gs[3, :])
+    ax_sep1.set_facecolor(BG); ax_sep1.axis("off")
+    ax_sep1.axhline(0.5, color=BORDER, linewidth=1, xmin=0, xmax=1)
+    ax_sep1.text(0.5, 0.5, "GÉNEROS",
+                 ha="center", va="center", fontsize=8, fontweight="bold",
+                 color=MUTED, fontfamily="DejaVu Sans", transform=ax_sep1.transAxes,
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor=BG, edgecolor=BG))
 
-    # Donut manual con wedges
-    inner_ax = ax_donut.inset_axes([0.05, 0.05, 0.90, 0.82])
-    inner_ax.set_facecolor(BG)
-    inner_ax.axis("equal")
+    # ══════════════════════════════════════════════════════════════
+    # SECCIÓN 4 — TOP 5 GÉNEROS POR POPULARIDAD (izq)
+    # ══════════════════════════════════════════════════════════════
+    ax_gp = fig.add_subplot(gs[4, 0])
+    draw_card(ax_gp, BG_CARD, BORDER)
+    ax_gp.set_xlim(0, 1); ax_gp.set_ylim(0, 1); ax_gp.axis("off")
+    ax_gp.text(0.5, 0.96, "TOP GÉNEROS POR POPULARIDAD",
+               ha="center", va="top", fontsize=8.5, fontweight="bold",
+               color=ACCENT, fontfamily="DejaVu Sans", transform=ax_gp.transAxes)
+    ax_gp.axhline(0.91, color=BORDER, linewidth=0.8, xmin=0.04, xmax=0.96)
 
-    donut_vals = [n_pel if n_pel > 0 else 0.01, n_ser if n_ser > 0 else 0.01]
-    donut_cols = [BLUE2, DARK_G]
-    wedges, _ = inner_ax.pie(
-        donut_vals,
-        colors=donut_cols,
-        startangle=90,
-        wedgeprops=dict(width=0.45, edgecolor=BG, linewidth=2),
-    )
-    # Texto central
-    inner_ax.text(0, 0.12, f"{pct_pel:.0f}%",
-                  ha="center", va="center", fontsize=20, fontweight="bold",
-                  color=BLUE2, fontfamily="DejaVu Sans")
-    inner_ax.text(0, -0.22, "películas",
-                  ha="center", va="center", fontsize=7,
-                  color=GRAY, fontfamily="DejaVu Sans")
-    # Leyenda simple
-    inner_ax.text(-1.25, -1.35, f"● Películas  {pct_pel:.0f}%",
-                  ha="left", fontsize=7, color=BLUE2, fontfamily="DejaVu Sans")
-    inner_ax.text(-1.25, -1.65, f"● Series       {pct_ser:.0f}%",
-                  ha="left", fontsize=7, color=GRAY, fontfamily="DejaVu Sans")
+    if top5_gen_pop:
+        draw_ranked_list(
+            ax_gp, top5_gen_pop,
+            col_num=ACCENT,
+            label_fn=lambda x: x[0],
+            sub_fn=lambda x: f"Pop. prom. {x[1]:.1f}",
+            top_offset=0.83, step=0.162
+        )
+    else:
+        ax_gp.text(0.5, 0.5, "Sin datos", ha="center", va="center",
+                   fontsize=9, color=MUTED, fontfamily="DejaVu Sans",
+                   transform=ax_gp.transAxes)
 
-    # ══ SECCIÓN 5: TOP 3 PAÍSES + CALIFICACIÓN PROMEDIO ══════════
-    ax_paises = fig.add_subplot(gs[5, 0])
-    ax_paises.set_facecolor(BG)
-    ax_paises.set_xlim(0, 1); ax_paises.set_ylim(0, 1)
-    ax_paises.axis("off")
+    # ══════════════════════════════════════════════════════════════
+    # SECCIÓN 4 — TOP 5 GÉNEROS POR CATÁLOGO (der)
+    # ══════════════════════════════════════════════════════════════
+    ax_gc = fig.add_subplot(gs[4, 1])
+    draw_card(ax_gc, BG_CARD, BORDER)
+    ax_gc.set_xlim(0, 1); ax_gc.set_ylim(0, 1); ax_gc.axis("off")
+    ax_gc.text(0.5, 0.96, "TOP GÉNEROS POR CATÁLOGO",
+               ha="center", va="top", fontsize=8.5, fontweight="bold",
+               color=TEAL, fontfamily="DejaVu Sans", transform=ax_gc.transAxes)
+    ax_gc.axhline(0.91, color=BORDER, linewidth=0.8, xmin=0.04, xmax=0.96)
 
-    ax_paises.text(0.0, 0.97, "TOP PAÍSES",
-                   ha="left", va="top", fontsize=9, fontweight="bold",
-                   color=BLUE2, fontfamily="DejaVu Sans", transform=ax_paises.transAxes)
-    ax_paises.axhline(0.90, color=BLUE, linewidth=1, xmin=0, xmax=1)
+    if top5_gen_cat:
+        draw_ranked_list(
+            ax_gc, top5_gen_cat,
+            col_num=TEAL,
+            label_fn=lambda x: x[0],
+            sub_fn=lambda x: f"{x[1]:,} títulos",
+            top_offset=0.83, step=0.162
+        )
+    else:
+        ax_gc.text(0.5, 0.5, "Sin datos", ha="center", va="center",
+                   fontsize=9, color=MUTED, fontfamily="DejaVu Sans",
+                   transform=ax_gc.transAxes)
 
-    p_ypos = [0.75, 0.54, 0.33]
-    for i, (pais, cnt) in enumerate(zip(top3_paises.index, top3_paises.values)):
-        yp = p_ypos[i]
-        circ2 = Circle((0.05, yp + 0.01), 0.045,
-                        transform=ax_paises.transAxes,
-                        facecolor=BLUE if i == 0 else DARK_G,
-                        edgecolor=BLUE, linewidth=1.2, zorder=3)
-        ax_paises.add_patch(circ2)
-        ax_paises.text(0.05, yp + 0.01, str(i + 1),
-                       ha="center", va="center", fontsize=7, fontweight="bold",
-                       color=WHITE, fontfamily="DejaVu Sans",
-                       transform=ax_paises.transAxes, zorder=4)
-        if i < 2:
-            ax_paises.plot([0.05, 0.05], [yp - 0.085, yp - 0.025],
-                           color=BLUE, linewidth=1,
-                           transform=ax_paises.transAxes, zorder=2, alpha=0.5)
-        ax_paises.text(0.16, yp + 0.06, pais,
-                       ha="left", va="center", fontsize=8.5, fontweight="bold",
-                       color=WHITE, fontfamily="DejaVu Sans", transform=ax_paises.transAxes)
-        ax_paises.text(0.16, yp - 0.04, f"{cnt:,} títulos",
-                       ha="left", va="center", fontsize=7,
-                       color=GRAY, fontfamily="DejaVu Sans", transform=ax_paises.transAxes)
+    # ══════════════════════════════════════════════════════════════
+    # SEPARADOR 2
+    # ══════════════════════════════════════════════════════════════
+    ax_sep2 = fig.add_subplot(gs[6, :])
+    ax_sep2.set_facecolor(BG); ax_sep2.axis("off")
+    ax_sep2.axhline(0.5, color=BORDER, linewidth=1, xmin=0, xmax=1)
+    ax_sep2.text(0.5, 0.5, "PAÍSES",
+                 ha="center", va="center", fontsize=8, fontweight="bold",
+                 color=MUTED, fontfamily="DejaVu Sans", transform=ax_sep2.transAxes,
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor=BG, edgecolor=BG))
 
-    # Panel derecho: calificación promedio
-    ax_val = fig.add_subplot(gs[5, 1])
-    ax_val.set_facecolor(BG_CARD2)
-    ax_val.set_xlim(0, 1); ax_val.set_ylim(0, 1)
-    ax_val.axis("off")
-    for sp in ax_val.spines.values():
-        sp.set_visible(True); sp.set_edgecolor(BORDER_C); sp.set_linewidth(1.5)
+    # ══════════════════════════════════════════════════════════════
+    # SECCIÓN 5 — TOP 5 PAÍSES POR PRODUCCIÓN (izq)
+    # ══════════════════════════════════════════════════════════════
+    ax_pp = fig.add_subplot(gs[7, 0])
+    draw_card(ax_pp, BG_CARD, BORDER)
+    ax_pp.set_xlim(0, 1); ax_pp.set_ylim(0, 1); ax_pp.axis("off")
+    ax_pp.text(0.5, 0.96, "TOP PAÍSES POR PRODUCCIÓN",
+               ha="center", va="top", fontsize=8.5, fontweight="bold",
+               color=BLUE, fontfamily="DejaVu Sans", transform=ax_pp.transAxes)
+    ax_pp.axhline(0.91, color=BORDER, linewidth=0.8, xmin=0.04, xmax=0.96)
 
-    ax_val.text(0.5, 0.85, f"{val_avg:.1f}",
-                ha="center", va="center", fontsize=40, fontweight="bold",
-                color=BLUE2, fontfamily="DejaVu Sans", transform=ax_val.transAxes)
-    ax_val.text(0.5, 0.50, "/ 10",
-                ha="center", va="center", fontsize=12,
-                color=GRAY, fontfamily="DejaVu Sans", transform=ax_val.transAxes)
-    ax_val.text(0.5, 0.25, "CALIFICACIÓN\nPROMEDIO",
-                ha="center", va="center", fontsize=7.5, fontweight="bold",
-                color=WHITE, fontfamily="DejaVu Sans", transform=ax_val.transAxes,
-                linespacing=1.4)
+    if len(top5_paises_prod) > 0:
+        items_pp = list(zip(top5_paises_prod.index, top5_paises_prod.values))
+        draw_ranked_list(
+            ax_pp, items_pp,
+            col_num=BLUE,
+            label_fn=lambda x: x[0],
+            sub_fn=lambda x: f"{x[1]:,} títulos",
+            top_offset=0.83, step=0.162
+        )
+    else:
+        ax_pp.text(0.5, 0.5, "Sin datos", ha="center", va="center",
+                   fontsize=9, color=MUTED, fontfamily="DejaVu Sans",
+                   transform=ax_pp.transAxes)
 
-    # ══ SECCIÓN 6: PIE DE PÁGINA ══════════════════════════════════
-    ax_foot = fig.add_subplot(gs[6, :])
+    # ══════════════════════════════════════════════════════════════
+    # SECCIÓN 5 — TOP 5 PAÍSES POR POPULARIDAD (der)
+    # ══════════════════════════════════════════════════════════════
+    ax_ppop = fig.add_subplot(gs[7, 1])
+    draw_card(ax_ppop, BG_CARD, BORDER)
+    ax_ppop.set_xlim(0, 1); ax_ppop.set_ylim(0, 1); ax_ppop.axis("off")
+    ax_ppop.text(0.5, 0.96, "TOP PAÍSES POR POPULARIDAD",
+                 ha="center", va="top", fontsize=8.5, fontweight="bold",
+                 color=GREEN, fontfamily="DejaVu Sans", transform=ax_ppop.transAxes)
+    ax_ppop.axhline(0.91, color=BORDER, linewidth=0.8, xmin=0.04, xmax=0.96)
+
+    if top5_paises_pop:
+        draw_ranked_list(
+            ax_ppop, top5_paises_pop,
+            col_num=GREEN,
+            label_fn=lambda x: x[0],
+            sub_fn=lambda x: f"Pop. prom. {x[1]:.1f}",
+            top_offset=0.83, step=0.162
+        )
+    else:
+        ax_ppop.text(0.5, 0.5, "Sin datos (mín. 5 títulos)",
+                     ha="center", va="center", fontsize=9, color=MUTED,
+                     fontfamily="DejaVu Sans", transform=ax_ppop.transAxes)
+
+    # ══════════════════════════════════════════════════════════════
+    # PIE DE PÁGINA
+    # ══════════════════════════════════════════════════════════════
+    ax_foot = fig.add_subplot(gs[8, :])
     ax_foot.set_facecolor(BG)
     ax_foot.set_xlim(0, 1); ax_foot.set_ylim(0, 1)
     ax_foot.axis("off")
-    ax_foot.axhline(0.90, color=DARK_G, linewidth=0.8, xmin=0, xmax=1)
+    ax_foot.axhline(0.95, color=BORDER, linewidth=0.8, xmin=0, xmax=1)
     ax_foot.text(0.5, 0.45,
                  "Fuente: TMDB  ·  ADY1104 Visualización de Datos  ·  Duoc UC 2026",
-                 ha="center", va="center", fontsize=6.5,
-                 color=GRAY, fontfamily="DejaVu Sans", transform=ax_foot.transAxes)
+                 ha="center", va="center", fontsize=7,
+                 color=MUTED, fontfamily="DejaVu Sans", transform=ax_foot.transAxes)
 
-    # Exportar a PNG en memoria
+    # ── Exportar a PNG en memoria
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight",
+    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight",
                 facecolor=BG, edgecolor="none")
     plt.close(fig)
     buf.seek(0)
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
-# ESTILOS CSS GLOBALES─
+# ── ESTILOS CSS GLOBALES ─────────────────────────────────────────
 external_css = [
     dbc.themes.BOOTSTRAP,
     "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
@@ -436,7 +537,7 @@ app = Dash(__name__,
            title="StreamView Analytics")
 server = app.server
 
-# SIDEBAR
+# ── SIDEBAR ──────────────────────────────────────────────────────
 sidebar_header = html.Div([
     html.Div([
         html.Div("▶", style={
@@ -540,7 +641,7 @@ sidebar = html.Div([
     "overflowY":"auto",
 })
 
-# LAYOUT PRINCIPAL─
+# ── LAYOUT PRINCIPAL ─────────────────────────────────────────────
 app.layout = html.Div([
     dcc.Store(id="theme-mode", storage_type="local", data="system"),
     dcc.Store(id="theme-resolved", data="dark"),
@@ -600,7 +701,7 @@ app.layout = html.Div([
 ], style={"backgroundColor":BG_MAIN,"fontFamily":FONT})
 
 
-# TEMA (claro / oscuro / automático)
+# ── TEMA (claro / oscuro / automático) ──────────────────────────
 app.clientside_callback(
     """
     function(n_clicks, mode) {
@@ -635,7 +736,7 @@ app.clientside_callback(
 )
 
 
-# CALLBACKS
+# ── CALLBACKS ────────────────────────────────────────────────────
 
 @app.callback(
     Output("sidebar-body","className"),
@@ -698,20 +799,21 @@ def update_kpis(tipo, years):
     return dbc.Row(cols, className="g-2")
 
 
-# CALLBACK: DESCARGA INFOGRAFÍA 
+# ── CALLBACK: DESCARGA INFOGRAFÍA ────────────────────────────────
 @app.callback(
     Output("download-infografia", "data"),
     Input("btn-descargar-infografia", "n_clicks"),
     State("filtro-tipo", "value"),
     State("filtro-years", "value"),
+    State("filtro-top", "value"),
     prevent_initial_call=True,
 )
-def descargar_infografia(n_clicks, tipo, year_range):
+def descargar_infografia(n_clicks, tipo, year_range, top_n):
     """
     Al hacer click en el botón, genera la infografía con los filtros
     activos en ese momento y la envía como PNG al browser.
     """
-    png_b64 = generar_infografia_png(tipo, year_range)
+    png_b64 = generar_infografia_png(tipo, year_range, top_n)
     png_bytes = base64.b64decode(png_b64)
 
     tipo_label = tipo.lower().replace("é","e").replace("í","i") if tipo and tipo != "Todos" else "catalogo"
@@ -826,16 +928,170 @@ def render_tab(tab, tipo, years, top_n, theme):
     # ══ GEOGRAFÍA ═════════════════════════════════════════════════
     elif tab == "tab-geo":
 
-        paises_s = df["country"].dropna().str.split(", ").explode()
+        # ── Datos compartidos
+        paises_s = df["country"].dropna().str.split(", ").explode().str.strip()
+
+        # ── 1. Género más popular por país (gráfico principal) ──────
+        rows_cg = []
+        for _, row in df.dropna(subset=["country", "genres"]).iterrows():
+            pop = row["popularity"]
+            if pd.isna(pop):
+                continue
+            for c in row["country"].split(", "):
+                c = c.strip()
+                if c:
+                    for g in row["genres"].split(", "):
+                        g = g.strip()
+                        if g:
+                            rows_cg.append({"País": c, "Género": g, "popularity": pop})
+
+        fig_gen_pais = go.Figure()
+        if rows_cg:
+            cgdf = pd.DataFrame(rows_cg)
+            # Popularidad media por (País, Género); sólo países con ≥5 títulos
+            pais_count = paises_s.value_counts()
+            paises_validos = pais_count[pais_count >= 5].index.tolist()
+            cgdf = cgdf[cgdf["País"].isin(paises_validos)]
+
+            if len(cgdf) > 0:
+                # Media de popularidad por País×Género; sort para desempate determinista
+                gpc = (
+                    cgdf.groupby(["País", "Género"])["popularity"]
+                    .mean()
+                    .reset_index()
+                    .sort_values(["País", "popularity", "Género"],
+                                 ascending=[True, False, True])
+                )
+                # Género dominante por país (primer registro tras el sort → mayor pop, desempate alfabético)
+                dominant = gpc.groupby("País").first().reset_index()
+                dominant.columns = ["País", "Género", "PopProm"]
+
+                # Ordenar por popularidad prom del género dominante, tomar top_n países
+                dominant = dominant.sort_values("PopProm", ascending=False).head(top_n)
+                dominant = dominant.sort_values("PopProm")  # para horizontal bar ascendente
+
+                # Color por género (paleta cíclica de los accents)
+                generos_uniq = dominant["Género"].unique().tolist()
+                palette = [C_ACCENT1, C_ACCENT2, C_ACCENT4, C_ACCENT5,
+                           C_HIGHLIGHT, "#F472B6", "#34D399", "#FB923C"]
+                color_map = {g: palette[i % len(palette)]
+                             for i, g in enumerate(generos_uniq)}
+
+                for genero in generos_uniq:
+                    sub = dominant[dominant["Género"] == genero]
+                    fig_gen_pais.add_trace(go.Bar(
+                        x=sub["PopProm"],
+                        y=sub["País"],
+                        name=genero,
+                        orientation="h",
+                        marker=dict(color=color_map[genero],
+                                    opacity=0.85,
+                                    line=dict(color="rgba(0,0,0,0)")),
+                        text=[f"{genero}  {v:.1f}" for v in sub["PopProm"]],
+                        textposition="outside",
+                        textfont=dict(color=C_TEXT, size=9),
+                        hovertemplate="%{y} — " + genero + ": pop. prom. %{x:.1f}<extra></extra>",
+                    ))
+
+                lay_gp = base_layout(
+                    f"Género más popular por país (top {top_n} países)",
+                    bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER
+                )
+                lay_gp["xaxis"]["title"] = "Popularidad promedio"
+                lay_gp["yaxis"]["title"] = ""
+                lay_gp["xaxis"]["showgrid"] = True
+                lay_gp["barmode"] = "overlay"
+                lay_gp["legend"] = dict(
+                    orientation="h", yanchor="bottom", y=1.02,
+                    xanchor="left", x=0,
+                    font=dict(color=C_TEXT, size=10),
+                    bgcolor="rgba(0,0,0,0)"
+                )
+                lay_gp["margin"] = dict(l=8, r=80, t=60, b=8)
+                max_pop = dominant["PopProm"].max() if len(dominant) > 0 else 1
+                fig_gen_pais.update_layout(**lay_gp,
+                                           xaxis_range=[0, max_pop * 1.25])
+            else:
+                lay_gp = base_layout("Género más popular por país",
+                                     bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+                fig_gen_pais.update_layout(**lay_gp)
+                fig_gen_pais.add_annotation(
+                    text="Sin datos suficientes (mín. 5 títulos por país)",
+                    xref="paper", yref="paper", x=0.5, y=0.5,
+                    showarrow=False, font=dict(color=C_MUTED, size=13)
+                )
+        else:
+            lay_gp = base_layout("Género más popular por país",
+                                 bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+            fig_gen_pais.update_layout(**lay_gp)
+            fig_gen_pais.add_annotation(
+                text="Sin datos disponibles",
+                xref="paper", yref="paper", x=0.5, y=0.5,
+                showarrow=False, font=dict(color=C_MUTED, size=13)
+            )
+
+        # ── 2. Top 5 países más populares (secundario) ──────────────
+        rows_cp = []
+        for _, row in df.dropna(subset=["country"]).iterrows():
+            pop = row["popularity"]
+            if pd.isna(pop):
+                continue
+            for c in row["country"].split(", "):
+                c = c.strip()
+                if c:
+                    rows_cp.append({"País": c, "popularity": pop})
+
+        fig_pop_pais = go.Figure()
+        if rows_cp:
+            cpdf = pd.DataFrame(rows_cp)
+            cp_stats = cpdf.groupby("País")["popularity"].agg(["mean", "count"]).reset_index()
+            cp_stats = cp_stats[cp_stats["count"] >= 5]
+            top_cp = cp_stats.nlargest(5, "mean").sort_values("mean")
+            if len(top_cp) > 0:
+                fig_pop_pais.add_trace(go.Bar(
+                    x=top_cp["mean"], y=top_cp["País"],
+                    orientation="h",
+                    marker=dict(
+                        color=top_cp["mean"],
+                        colorscale=[[0, "rgba(16,185,129,0.3)"], [1, C_ACCENT4]],
+                        showscale=False,
+                        line=dict(color="rgba(0,0,0,0)")
+                    ),
+                    text=top_cp["mean"].apply(lambda x: f"{x:.1f}"),
+                    textposition="outside",
+                    textfont=dict(color=C_TEXT, size=10),
+                    hovertemplate="%{y}: popularidad prom. %{x:.1f}<extra></extra>",
+                ))
+                max_cp = top_cp["mean"].max()
+            else:
+                max_cp = 1
+        else:
+            max_cp = 1
+
+        lay_cp = base_layout("Top 5 países más populares",
+                             bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        lay_cp["xaxis"]["title"] = "Popularidad promedio"
+        lay_cp["yaxis"]["title"] = ""
+        lay_cp["xaxis"]["showgrid"] = False
+        lay_cp["margin"] = dict(l=8, r=60, t=44, b=8)
+        fig_pop_pais.update_layout(**lay_cp, xaxis_range=[0, max_cp * 1.2])
+        if not rows_cp or len(cp_stats[cp_stats["count"] >= 5]) == 0:
+            fig_pop_pais.add_annotation(
+                text="Sin datos suficientes (mín. 5 títulos por país)",
+                xref="paper", yref="paper", x=0.5, y=0.5,
+                showarrow=False, font=dict(color=C_MUTED, size=11)
+            )
+
+        # ── 3. Top N países productores (existente) ─────────────────
         top_p = paises_s.value_counts().head(top_n).reset_index()
-        top_p.columns = ["País","Cantidad"]
+        top_p.columns = ["País", "Cantidad"]
         top_p = top_p.sort_values("Cantidad")
 
         fig_paises = go.Figure(go.Bar(
             x=top_p["Cantidad"], y=top_p["País"], orientation="h",
             marker=dict(
                 color=top_p["Cantidad"],
-                colorscale=[[0, "rgba(6,182,212,0.3)"],[1, C_ACCENT2]],
+                colorscale=[[0, "rgba(6,182,212,0.3)"], [1, C_ACCENT2]],
                 showscale=False,
                 line=dict(color="rgba(0,0,0,0)")
             ),
@@ -844,22 +1100,25 @@ def render_tab(tab, tipo, years, top_n, theme):
             textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:,} títulos<extra></extra>",
         ))
-        lay_p = base_layout(f"Top {top_n} países productores", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        lay_p = base_layout(f"Top {top_n} países productores",
+                            bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_p["xaxis"]["title"] = "Cantidad de títulos"
         lay_p["yaxis"]["title"] = ""
         lay_p["xaxis"]["showgrid"] = False
         lay_p["margin"] = dict(l=8, r=60, t=44, b=8)
-        fig_paises.update_layout(**lay_p, xaxis_range=[0, top_p["Cantidad"].max()*1.18])
+        fig_paises.update_layout(**lay_p,
+                                 xaxis_range=[0, top_p["Cantidad"].max() * 1.18])
 
+        # ── 4. Top N idiomas (existente) ─────────────────────────────
         lang_s = df["lang_label"].value_counts().head(top_n).reset_index()
-        lang_s.columns = ["Idioma","Cantidad"]
+        lang_s.columns = ["Idioma", "Cantidad"]
         lang_s = lang_s.sort_values("Cantidad")
 
         fig_lang = go.Figure(go.Bar(
             x=lang_s["Cantidad"], y=lang_s["Idioma"], orientation="h",
             marker=dict(
                 color=lang_s["Cantidad"],
-                colorscale=[[0, "rgba(244,114,182,0.3)"],[1, C_ACCENT3]],
+                colorscale=[[0, "rgba(244,114,182,0.3)"], [1, C_ACCENT3]],
                 showscale=False,
                 line=dict(color="rgba(0,0,0,0)")
             ),
@@ -868,24 +1127,42 @@ def render_tab(tab, tipo, years, top_n, theme):
             textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:,} contenidos<extra></extra>",
         ))
-        lay_l = base_layout(f"Top {top_n} idiomas disponibles", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        lay_l = base_layout(f"Top {top_n} idiomas disponibles",
+                            bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_l["xaxis"]["title"] = "Cantidad de contenidos"
         lay_l["yaxis"]["title"] = ""
         lay_l["xaxis"]["showgrid"] = False
         lay_l["margin"] = dict(l=8, r=60, t=44, b=8)
-        fig_lang.update_layout(**lay_l, xaxis_range=[0, lang_s["Cantidad"].max()*1.18])
+        fig_lang.update_layout(**lay_l,
+                               xaxis_range=[0, lang_s["Cantidad"].max() * 1.18])
 
         nota = html.Div(
-            "ℹ Un contenido con coproducción se contabiliza en cada país participante.",
-            style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
+            "ℹ Un contenido con coproducción se contabiliza en cada país participante.  "
+            "El género más popular se determina por popularidad promedio (mín. 5 títulos por país).",
+            style={"fontSize": "10px", "color": C_MUTED, "marginTop": "10px"}
         )
 
         return html.Div([
+            # Gráfico principal: género más popular por país (full width)
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_paises, config={"displayModeBar":False,"responsive":True},
-                             style={"height":"360px"}), padding="16px"), xs=12, lg=7),
-                dbc.Col(card(dcc.Graph(figure=fig_lang,   config={"displayModeBar":False,"responsive":True},
-                             style={"height":"360px"}), padding="16px"), xs=12, lg=5),
+                dbc.Col(card(dcc.Graph(figure=fig_gen_pais,
+                             config={"displayModeBar": False, "responsive": True},
+                             style={"height": "420px"}), padding="16px"), width=12),
+            ], className="g-3 mb-3"),
+            # Fila secundaria: países más populares + países productores
+            dbc.Row([
+                dbc.Col(card(dcc.Graph(figure=fig_pop_pais,
+                             config={"displayModeBar": False, "responsive": True},
+                             style={"height": "300px"}), padding="16px"), xs=12, lg=5),
+                dbc.Col(card(dcc.Graph(figure=fig_paises,
+                             config={"displayModeBar": False, "responsive": True},
+                             style={"height": "300px"}), padding="16px"), xs=12, lg=7),
+            ], className="g-3 mb-3"),
+            # Fila terciaria: idiomas
+            dbc.Row([
+                dbc.Col(card(dcc.Graph(figure=fig_lang,
+                             config={"displayModeBar": False, "responsive": True},
+                             style={"height": "300px"}), padding="16px"), width=12),
             ], className="g-3"),
             nota,
         ])
