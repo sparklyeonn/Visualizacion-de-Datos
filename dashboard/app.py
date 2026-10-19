@@ -1,6 +1,6 @@
 """
 STREAMVIEW ANALYTICS | DASHBOARD INTERACTIVO
-Diseño Visualizacion de Datos | ADY1104 Duoc UC 2026
+Diseño Visualización de Datos | ADY1104 Duoc UC 2026
 """
 
 import os, warnings, io, base64
@@ -945,16 +945,25 @@ def render_tab(tab, tipo, years, top_n, theme):
                         if g:
                             rows_cg.append({"País": c, "Género": g, "popularity": pop})
 
+        # Popularidad promedio por país, coloreada por género dominante
         fig_gen_pais = go.Figure()
         if rows_cg:
             cgdf = pd.DataFrame(rows_cg)
-            # Popularidad media por (País, Género); sólo países con ≥5 títulos
+            # Sólo países con ≥5 títulos
             pais_count = paises_s.value_counts()
             paises_validos = pais_count[pais_count >= 5].index.tolist()
             cgdf = cgdf[cgdf["País"].isin(paises_validos)]
 
             if len(cgdf) > 0:
-                # Media de popularidad por País×Género; sort para desempate determinista
+                # Popularidad promedio del país (todos sus títulos)
+                pop_pais = (
+                    cgdf.groupby("País")["popularity"]
+                    .mean()
+                    .reset_index()
+                    .rename(columns={"popularity": "PopProm"})
+                )
+
+                # Género dominante por país (mayor pop media; desempate alfabético)
                 gpc = (
                     cgdf.groupby(["País", "Género"])["popularity"]
                     .mean()
@@ -962,57 +971,79 @@ def render_tab(tab, tipo, years, top_n, theme):
                     .sort_values(["País", "popularity", "Género"],
                                  ascending=[True, False, True])
                 )
-                # Género dominante por país (primer registro tras el sort → mayor pop, desempate alfabético)
-                dominant = gpc.groupby("País").first().reset_index()
-                dominant.columns = ["País", "Género", "PopProm"]
+                genero_dom = (
+                    gpc.groupby("País")
+                    .first()
+                    .reset_index()[["País", "Género"]]
+                )
 
-                # Ordenar por popularidad prom del género dominante, tomar top_n países
-                dominant = dominant.sort_values("PopProm", ascending=False).head(top_n)
-                dominant = dominant.sort_values("PopProm")  # para horizontal bar ascendente
+                # Unir: popularidad total + género dominante
+                df_plot = pop_pais.merge(genero_dom, on="País")
 
-                # Color por género (paleta cíclica de los accents)
-                generos_uniq = dominant["Género"].unique().tolist()
+                # Ordenar de mayor a menor popularidad, tomar top_n
+                df_plot = df_plot.sort_values("PopProm", ascending=False).head(top_n)
+                df_plot = df_plot.sort_values("PopProm")  # ascendente para barras horizontales
+
+                # Paleta por género dominante
+                generos_uniq = df_plot["Género"].unique().tolist()
                 palette = [C_ACCENT1, C_ACCENT2, C_ACCENT4, C_ACCENT5,
                            C_HIGHLIGHT, "#F472B6", "#34D399", "#FB923C"]
                 color_map = {g: palette[i % len(palette)]
                              for i, g in enumerate(generos_uniq)}
 
-                for genero in generos_uniq:
-                    sub = dominant[dominant["Género"] == genero]
-                    fig_gen_pais.add_trace(go.Bar(
-                        x=sub["PopProm"],
-                        y=sub["País"],
-                        name=genero,
-                        orientation="h",
-                        marker=dict(color=color_map[genero],
-                                    opacity=0.85,
-                                    line=dict(color="rgba(0,0,0,0)")),
-                        text=[f"{genero}  {v:.1f}" for v in sub["PopProm"]],
-                        textposition="outside",
-                        textfont=dict(color=C_TEXT, size=9),
-                        hovertemplate="%{y} — " + genero + ": pop. prom. %{x:.1f}<extra></extra>",
-                    ))
+                bar_colors = df_plot["Género"].map(color_map).tolist()
 
+                fig_gen_pais.add_trace(go.Bar(
+                    x=df_plot["PopProm"],
+                    y=df_plot["País"],
+                    orientation="h",
+                    marker=dict(color=bar_colors, opacity=0.88,
+                                line=dict(color="rgba(0,0,0,0)")),
+                    text=[f"{g}  ·  {v:.1f}"
+                          for g, v in zip(df_plot["Género"], df_plot["PopProm"])],
+                    textposition="outside",
+                    textfont=dict(color=C_TEXT, size=9),
+                    hovertemplate=(
+                        "<b>%{y}</b><br>"
+                        "Popularidad promedio: %{x:.1f}<br>"
+                        "Género dominante: %{text}<extra></extra>"
+                    ),
+                    customdata=df_plot["Género"],
+                ))
+
+                # Leyenda manual como anotaciones de color
                 lay_gp = base_layout(
-                    f"Género más popular por país (top {top_n} países)",
+                    f"Popularidad promedio por país — top {top_n} · color = género dominante",
                     bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER
                 )
-                lay_gp["xaxis"]["title"] = "Popularidad promedio"
+                lay_gp["xaxis"]["title"] = "Popularidad promedio (todos los títulos del país)"
                 lay_gp["yaxis"]["title"] = ""
                 lay_gp["xaxis"]["showgrid"] = True
-                lay_gp["barmode"] = "overlay"
-                lay_gp["legend"] = dict(
-                    orientation="h", yanchor="bottom", y=1.02,
-                    xanchor="left", x=0,
-                    font=dict(color=C_TEXT, size=10),
-                    bgcolor="rgba(0,0,0,0)"
-                )
-                lay_gp["margin"] = dict(l=8, r=80, t=60, b=8)
-                max_pop = dominant["PopProm"].max() if len(dominant) > 0 else 1
+                lay_gp["margin"] = dict(l=8, r=100, t=48, b=8)
+                max_pop = df_plot["PopProm"].max() if len(df_plot) > 0 else 1
                 fig_gen_pais.update_layout(**lay_gp,
-                                           xaxis_range=[0, max_pop * 1.25])
+                                           xaxis_range=[0, max_pop * 1.28])
+
+                # Añadir leyenda de géneros como trazas fantasma
+                for genero in generos_uniq:
+                    fig_gen_pais.add_trace(go.Bar(
+                        x=[None], y=[None],
+                        name=genero,
+                        marker=dict(color=color_map[genero], opacity=0.88),
+                        showlegend=True,
+                    ))
+                fig_gen_pais.update_layout(
+                    legend=dict(
+                        orientation="h", yanchor="bottom", y=1.01,
+                        xanchor="left", x=0,
+                        font=dict(color=C_TEXT, size=9),
+                        bgcolor="rgba(0,0,0,0)",
+                        title=dict(text="Género dominante  ", font=dict(size=9, color=C_MUTED)),
+                    ),
+                    barmode="overlay",
+                )
             else:
-                lay_gp = base_layout("Género más popular por país",
+                lay_gp = base_layout("Popularidad promedio por país",
                                      bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
                 fig_gen_pais.update_layout(**lay_gp)
                 fig_gen_pais.add_annotation(
@@ -1021,7 +1052,7 @@ def render_tab(tab, tipo, years, top_n, theme):
                     showarrow=False, font=dict(color=C_MUTED, size=13)
                 )
         else:
-            lay_gp = base_layout("Género más popular por país",
+            lay_gp = base_layout("Popularidad promedio por país",
                                  bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
             fig_gen_pais.update_layout(**lay_gp)
             fig_gen_pais.add_annotation(
