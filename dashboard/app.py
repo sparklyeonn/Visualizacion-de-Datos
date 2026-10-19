@@ -906,59 +906,7 @@ def render_tab(tab, tipo, years, top_n, theme):
                 showarrow=False, font=dict(color=C_MUTED, size=13)
             )
 
-        # ── 2. Top 5 países más populares (secundario) ──────────────
-        rows_cp = []
-        for _, row in df.dropna(subset=["country"]).iterrows():
-            pop = row["popularity"]
-            if pd.isna(pop):
-                continue
-            for c in row["country"].split(", "):
-                c = c.strip()
-                if c:
-                    rows_cp.append({"País": c, "popularity": pop})
-
-        fig_pop_pais = go.Figure()
-        if rows_cp:
-            cpdf = pd.DataFrame(rows_cp)
-            cp_stats = cpdf.groupby("País")["popularity"].agg(["mean", "count"]).reset_index()
-            cp_stats = cp_stats[cp_stats["count"] >= 5]
-            top_cp = cp_stats.nlargest(5, "mean").sort_values("mean")
-            if len(top_cp) > 0:
-                fig_pop_pais.add_trace(go.Bar(
-                    x=top_cp["mean"], y=top_cp["País"],
-                    orientation="h",
-                    marker=dict(
-                        color=top_cp["mean"],
-                        colorscale=[[0, "rgba(16,185,129,0.3)"], [1, C_ACCENT4]],
-                        showscale=False,
-                        line=dict(color="rgba(0,0,0,0)")
-                    ),
-                    text=top_cp["mean"].apply(lambda x: f"{x:.1f}"),
-                    textposition="outside",
-                    textfont=dict(color=C_TEXT, size=10),
-                    hovertemplate="%{y}: popularidad prom. %{x:.1f}<extra></extra>",
-                ))
-                max_cp = top_cp["mean"].max()
-            else:
-                max_cp = 1
-        else:
-            max_cp = 1
-
-        lay_cp = base_layout("Top 5 países más populares",
-                             bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
-        lay_cp["xaxis"]["title"] = "Popularidad promedio"
-        lay_cp["yaxis"]["title"] = ""
-        lay_cp["xaxis"]["showgrid"] = False
-        lay_cp["margin"] = dict(l=8, r=60, t=44, b=8)
-        fig_pop_pais.update_layout(**lay_cp, xaxis_range=[0, max_cp * 1.2])
-        if not rows_cp or len(cp_stats[cp_stats["count"] >= 5]) == 0:
-            fig_pop_pais.add_annotation(
-                text="Sin datos suficientes (mín. 5 títulos por país)",
-                xref="paper", yref="paper", x=0.5, y=0.5,
-                showarrow=False, font=dict(color=C_MUTED, size=11)
-            )
-
-        # ── 3. Top N países productores (existente) ─────────────────
+        # ── 2. Top N países productores ──────────────────────────────
         top_p = paises_s.value_counts().head(top_n).reset_index()
         top_p.columns = ["País", "Cantidad"]
         top_p = top_p.sort_values("Cantidad")
@@ -1019,26 +967,20 @@ def render_tab(tab, tipo, years, top_n, theme):
         )
 
         return html.Div([
-            # Gráfico principal: género más popular por país (full width)
+            # Gráfico principal: popularidad promedio por país (full width)
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_gen_pais,
                              config={"displayModeBar": False, "responsive": True},
                              style={"height": "420px"}), padding="16px"), width=12),
             ], className="g-3 mb-3"),
-            # Fila secundaria: países más populares + países productores
+            # Fila secundaria: países productores + idiomas
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_pop_pais,
-                             config={"displayModeBar": False, "responsive": True},
-                             style={"height": "300px"}), padding="16px"), xs=12, lg=5),
                 dbc.Col(card(dcc.Graph(figure=fig_paises,
                              config={"displayModeBar": False, "responsive": True},
-                             style={"height": "300px"}), padding="16px"), xs=12, lg=7),
-            ], className="g-3 mb-3"),
-            # Fila terciaria: idiomas
-            dbc.Row([
+                             style={"height": "300px"}), padding="16px"), xs=12, lg=6),
                 dbc.Col(card(dcc.Graph(figure=fig_lang,
                              config={"displayModeBar": False, "responsive": True},
-                             style={"height": "300px"}), padding="16px"), width=12),
+                             style={"height": "300px"}), padding="16px"), xs=12, lg=6),
             ], className="g-3"),
             nota,
         ])
