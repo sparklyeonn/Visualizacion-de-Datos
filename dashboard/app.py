@@ -298,17 +298,19 @@ def generar_infografia_png(tipo, year_range, top_n=5):
                     fontsize=7.5, color=MUTED,
                     fontfamily="DejaVu Sans", transform=ax.transAxes)
 
-    # ── Canvas: layout 6 filas × 2 columnas muy compacto ────────────
-    fig = plt.figure(figsize=(10, 13), facecolor=BG)
+    # ── Canvas: layout 5 filas × 2 columnas, sin fila vacía ─────────
+    # Eliminado: gráfico "top países popularidad" y fila placeholder
+    # Ahora: header | KPIs | géneros (2 col) | países producción (full) | footer
+    fig = plt.figure(figsize=(10, 12), facecolor=BG)
     fig.patch.set_facecolor(BG)
 
     gs = GridSpec(
-        6, 2,
+        5, 2,
         figure=fig,
-        left=0.02, right=0.98,
-        top=0.955, bottom=0.03,
-        hspace=0.38, wspace=0.10,
-        height_ratios=[0.55, 0.85, 1.7, 1.7, 1.7, 0.30]
+        left=0.03, right=0.97,
+        top=0.96, bottom=0.05,
+        hspace=0.42, wspace=0.12,
+        height_ratios=[0.60, 0.90, 2.0, 2.0, 0.28]
     )
 
     # ── ROW 0: Cabecera ──────────────────────────────────────────────
@@ -316,31 +318,30 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     ax_h.set_facecolor(BG); ax_h.axis("off")
     ax_h.set_xlim(0, 1); ax_h.set_ylim(0, 1)
 
-    ax_h.text(0.0, 0.92, "STREAMVIEW ANALYTICS",
+    ax_h.text(0.0, 0.95, "STREAMVIEW ANALYTICS",
               ha="left", va="top", fontsize=20, fontweight="bold",
               color=ACCENT, fontfamily="DejaVu Sans", transform=ax_h.transAxes)
     ax_h.text(0.0, 0.30, "Resumen del catálogo",
               ha="left", va="top", fontsize=10, color=TEXT2,
               fontfamily="DejaVu Sans", transform=ax_h.transAxes)
-    ax_h.text(1.0, 0.92, f"{tipo_label}  ·  {y0}–{y1}",
-              ha="right", va="top", fontsize=8, color=MUTED,
+
+    # Filtro/rango — dos líneas: etiqueta pequeña arriba, años grandes abajo
+    ax_h.text(1.0, 0.95, tipo_label,
+              ha="right", va="top", fontsize=9, color=MUTED,
               fontfamily="DejaVu Sans", transform=ax_h.transAxes)
+    ax_h.text(1.0, 0.48, f"{y0} – {y1}",
+              ha="right", va="top", fontsize=18, fontweight="bold", color=TEXT2,
+              fontfamily="DejaVu Sans", transform=ax_h.transAxes)
+
     ax_h.axhline(0.0, color=DIVIDER, linewidth=1.5, xmin=0, xmax=1)
 
     # ── ROW 1: KPIs ──────────────────────────────────────────────────
     ax_k1 = fig.add_subplot(gs[1, 0])
     ax_k2 = fig.add_subplot(gs[1, 1])
 
-    if tipo == "Película":
-        kpi_card(ax_k1, f"{total:,}", "TÍTULOS EN EL CATÁLOGO", kpi_sub, ACCENT)
-    elif tipo == "Serie":
-        kpi_card(ax_k1, f"{total:,}", "TÍTULOS EN EL CATÁLOGO", kpi_sub, ACCENT)
-    else:
-        kpi_card(ax_k1, f"{total:,}", "TÍTULOS EN EL CATÁLOGO", kpi_sub, ACCENT)
-
+    kpi_card(ax_k1, f"{total:,}", "TÍTULOS EN EL CATÁLOGO", kpi_sub, ACCENT)
     kpi_card(ax_k2, f"{val_avg:.1f}", "CALIFICACIÓN PROMEDIO", "sobre 10 puntos", GREEN)
 
-    # Separador visual entre KPIs y gráficos
     for ax_kpi in [ax_k1, ax_k2]:
         ax_kpi.set_facecolor(BG_CARD)
         for sp in ax_kpi.spines.values():
@@ -350,17 +351,10 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     ax_gp = fig.add_subplot(gs[2, 0])
     ax_gc = fig.add_subplot(gs[2, 1])
 
-    if top5_gen_pop:
-        names_gp = [x[0] for x in top5_gen_pop]
-        vals_gp  = [x[1] for x in top5_gen_pop]
-    else:
-        names_gp, vals_gp = [], []
-
-    if top5_gen_cat:
-        names_gc = [x[0] for x in top5_gen_cat]
-        vals_gc  = [x[1] for x in top5_gen_cat]
-    else:
-        names_gc, vals_gc = [], []
+    names_gp = [x[0] for x in top5_gen_pop] if top5_gen_pop else []
+    vals_gp  = [x[1] for x in top5_gen_pop] if top5_gen_pop else []
+    names_gc = [x[0] for x in top5_gen_cat] if top5_gen_cat else []
+    vals_gc  = [x[1] for x in top5_gen_cat] if top5_gen_cat else []
 
     hbar_chart(ax_gp, names_gp, vals_gp, ACCENT,
                "Top géneros · popularidad",
@@ -369,9 +363,8 @@ def generar_infografia_png(tipo, year_range, top_n=5):
                "Top géneros · catálogo",
                fmt_fn=lambda v: f"{int(v):,}")
 
-    # ── ROW 3: Países producción / popularidad ───────────────────────
-    ax_pp   = fig.add_subplot(gs[3, 0])
-    ax_ppop = fig.add_subplot(gs[3, 1])
+    # ── ROW 3: Países producción (full width) ────────────────────────
+    ax_pp = fig.add_subplot(gs[3, :])
 
     if len(top5_paises_prod) > 0:
         names_pp = list(top5_paises_prod.index)
@@ -379,32 +372,16 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     else:
         names_pp, vals_pp = [], []
 
-    if top5_paises_pop:
-        names_ppop = [x[0] for x in top5_paises_pop]
-        vals_ppop  = [x[1] for x in top5_paises_pop]
-    else:
-        names_ppop, vals_ppop = [], []
-
     hbar_chart(ax_pp, names_pp, vals_pp, BLUE,
                "Top países · producción",
                fmt_fn=lambda v: f"{int(v):,}")
-    hbar_chart(ax_ppop, names_ppop, vals_ppop, GREEN,
-               "Top países · popularidad",
-               fmt_fn=lambda v: f"{v:.1f}")
 
-    # ── ROW 4: Placeholder para segunda fila de países (vacío elegante)
-    # Usamos esta fila para un separador visual y la nota de fuente
-    ax_mid = fig.add_subplot(gs[4, :])
-    ax_mid.set_facecolor(BG); ax_mid.axis("off")
-    # Línea decorativa con texto de sección
-    ax_mid.axhline(0.5, color=DIVIDER, linewidth=1, xmin=0.0, xmax=1.0)
-
-    # ── ROW 5: Pie de página ─────────────────────────────────────────
-    ax_foot = fig.add_subplot(gs[5, :])
+    # ── ROW 4: Pie de página ─────────────────────────────────────────
+    ax_foot = fig.add_subplot(gs[4, :])
     ax_foot.set_facecolor(BG); ax_foot.axis("off")
     ax_foot.set_xlim(0, 1); ax_foot.set_ylim(0, 1)
     ax_foot.axhline(0.98, color=DIVIDER, linewidth=0.8, xmin=0, xmax=1)
-    ax_foot.text(0.5, 0.45,
+    ax_foot.text(0.5, 0.40,
                  "Fuente: TMDB  ·  ADY1104 Visualización de Datos  ·  Duoc UC 2026",
                  ha="center", va="center", fontsize=7,
                  color=MUTED, fontfamily="DejaVu Sans", transform=ax_foot.transAxes)
