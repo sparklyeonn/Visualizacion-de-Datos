@@ -320,7 +320,7 @@ def generar_infografia_png(tipo, year_range, top_n=5):
             # ── Valor (alineado a la derecha)
             txt = fmt_fn(valor) if fmt_fn else f"{valor:.1f}"
             ax.text(0.965, yc + 0.025, txt,
-                    ha="right", va="center", fontsize=8.5,
+                    ha="right", va="center", fontsize=10.5,
                     color=color if rank == 1 else MUTED,
                     fontfamily="DejaVu Sans", transform=ax.transAxes,
                     fontweight="bold" if rank == 1 else "normal")
