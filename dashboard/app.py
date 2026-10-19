@@ -540,6 +540,37 @@ app.layout = html.Div([
 
     # Componente de descarga — necesario para que dcc.Download funcione
     dcc.Download(id="download-infografia"),
+    dcc.Download(id="download-infografia-pdf"),   # descarga en PDF
+
+    # Modal popup de formato
+    html.Div([
+        html.Div([
+            html.P("Elige el formato de descarga", style={
+                "fontWeight":"700","fontSize":"13px","marginBottom":"12px","color":"#0F172A"
+            }),
+            html.Button("⬇ PNG (imagen)", id="btn-dl-png", n_clicks=0, style={
+                "display":"block","width":"100%","marginBottom":"8px",
+                "padding":"9px","backgroundColor":"#7C3AED","color":"white",
+                "border":"none","borderRadius":"8px","cursor":"pointer","fontWeight":"600"
+            }),
+            html.Button("⬇ PDF (documento)", id="btn-dl-pdf", n_clicks=0, style={
+                "display":"block","width":"100%",
+                "padding":"9px","backgroundColor":"#3B82F6","color":"white",
+                "border":"none","borderRadius":"8px","cursor":"pointer","fontWeight":"600"
+            }),
+            html.Button("✕", id="btn-cerrar-modal", n_clicks=0, style={
+                "position":"absolute","top":"8px","right":"10px",
+                "background":"none","border":"none","fontSize":"16px",
+                "cursor":"pointer","color":"#94A3B8"
+            }),
+        ], style={
+            "backgroundColor":"white","borderRadius":"12px","padding":"20px",
+            "boxShadow":"0 8px 30px rgba(0,0,0,0.18)","position":"relative",
+            "width":"220px"
+        })
+    ], id="modal-formato", style={
+        "display":"none","position":"fixed","top":"70px","right":"24px","zIndex":"9999"
+    }),
 
     sidebar,
     html.Div([
@@ -692,29 +723,61 @@ def update_kpis(tipo, years):
 
 
 # ── CALLBACK: DESCARGA INFOGRAFÍA ────────────────────────────────
+# Abre/cierra el modal
+@app.callback(
+    Output("modal-formato", "style"),
+    Input("btn-descargar-infografia", "n_clicks"),
+    Input("btn-cerrar-modal", "n_clicks"),
+    Input("btn-dl-png", "n_clicks"),
+    Input("btn-dl-pdf", "n_clicks"),
+    prevent_initial_call=True,
+)
+def toggle_modal(*_):
+    from dash import ctx
+    abierto = {"display":"block","position":"fixed","top":"70px","right":"24px","zIndex":"9999"}
+    cerrado = {"display":"none","position":"fixed","top":"70px","right":"24px","zIndex":"9999"}
+    if ctx.triggered_id == "btn-descargar-infografia":
+        return abierto
+    return cerrado
+
+# Descarga PNG
 @app.callback(
     Output("download-infografia", "data"),
-    Input("btn-descargar-infografia", "n_clicks"),
+    Input("btn-dl-png", "n_clicks"),
     State("filtro-tipo", "value"),
     State("filtro-years", "value"),
     State("filtro-top", "value"),
     prevent_initial_call=True,
 )
-def descargar_infografia(n_clicks, tipo, year_range, top_n):
-    """
-    Al hacer click en el botón, genera la infografía con los filtros
-    activos en ese momento y la envía como PNG al browser.
-    """
+def descargar_png(n_clicks, tipo, year_range, top_n):
     png_b64 = generar_infografia_png(tipo, year_range, top_n)
     png_bytes = base64.b64decode(png_b64)
-
     tipo_label = tipo.lower().replace("é","e").replace("í","i") if tipo and tipo != "Todos" else "catalogo"
     y0 = int(year_range[0]) if year_range else YEAR_MIN
     y1 = int(year_range[1]) if year_range else YEAR_MAX
-    filename = f"streamview_resumen_{tipo_label}_{y0}_{y1}.png"
+    return dcc.send_bytes(png_bytes, f"streamview_resumen_{tipo_label}_{y0}_{y1}.png")
 
-    return dcc.send_bytes(png_bytes, filename)
-
+# Descarga PDF
+@app.callback(
+    Output("download-infografia-pdf", "data"),
+    Input("btn-dl-pdf", "n_clicks"),
+    State("filtro-tipo", "value"),
+    State("filtro-years", "value"),
+    State("filtro-top", "value"),
+    prevent_initial_call=True,
+)
+def descargar_pdf(n_clicks, tipo, year_range, top_n):
+    from PIL import Image
+    png_b64 = generar_infografia_png(tipo, year_range, top_n)
+    png_bytes = base64.b64decode(png_b64)
+    img = Image.open(io.BytesIO(png_bytes))
+    pdf_buf = io.BytesIO()
+    img.save(pdf_buf, format="PDF", resolution=130)
+    pdf_buf.seek(0)
+    tipo_label = tipo.lower().replace("é","e").replace("í","i") if tipo and tipo != "Todos" else "catalogo"
+    y0 = int(year_range[0]) if year_range else YEAR_MIN
+    y1 = int(year_range[1]) if year_range else YEAR_MAX
+    return dcc.send_bytes(pdf_buf.read(), f"streamview_resumen_{tipo_label}_{y0}_{y1}.pdf")
 
 @app.callback(
     Output("tab-content","children"),
