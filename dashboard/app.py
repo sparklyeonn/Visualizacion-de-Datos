@@ -150,14 +150,14 @@ def kpi_card(label, value, subtitle="", color=C_ACCENT1, icon=""):
 # ══════════════════════════════════════════════════════════════════
 def generar_infografia_png(tipo, year_range, top_n=5):
     """
-    Infografía estilo dashboard: fondo gris muy claro (#F8F9FA),
-    cuadrícula compacta, barras horizontales estilizadas, sin spines,
-    paleta moderna coherente con el dashboard.
-    Formato: 10×13 pulgadas a 130 dpi → ~1300×1690 px.
+    Infografía dashboard: fondo #F8F9FA, tarjetas con borde sutil,
+    rankings visuales con círculos numerados del 1 al 5.
+    Layout: header | 2 KPIs | 2×2 rankings | footer
+    Formato: 10×14 pulgadas a 130 dpi.
     """
     from collections import Counter
     from matplotlib.gridspec import GridSpec
-    import matplotlib.ticker as mticker
+    import matplotlib.patches as mpatches_local
 
     TOP = min(int(top_n) if top_n else 5, 5)
 
@@ -166,21 +166,22 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     y1 = int(year_range[1]) if year_range else YEAR_MAX
 
     # ── Paleta
-    BG       = "#F8F9FA"   # fondo página
-    BG_CARD  = "#FFFFFF"   # fondo tarjetas
-    ACCENT   = "#7C3AED"   # violeta
-    TEAL     = "#06B6D4"   # teal
-    GREEN    = "#10B981"   # verde
-    BLUE     = "#3B82F6"   # azul
-    AMBER    = "#F5A623"   # naranja
+    BG       = "#F8F9FA"
+    BG_CARD  = "#FFFFFF"
+    ACCENT   = "#7C3AED"
+    TEAL     = "#06B6D4"
+    GREEN    = "#10B981"
+    BLUE     = "#3B82F6"
+    AMBER    = "#F5A623"
     TEXT     = "#0F172A"
     TEXT2    = "#334155"
     MUTED    = "#94A3B8"
     DIVIDER  = "#E2E8F0"
+    BORDER   = "#D1D5DB"
 
     tipo_label = tipo if tipo and tipo != "Todos" else "Catálogo completo"
 
-    # ── Datos (idénticos a la versión anterior)
+    # ── Datos
     total   = len(df)
     n_pel   = int(len(df[df["type_label"] == "Película"]))
     n_ser   = int(len(df[df["type_label"] == "Serie"]))
@@ -199,7 +200,7 @@ def generar_infografia_png(tipo, year_range, top_n=5):
         for g in row["genres"].split(", "):
             rows_g.append(g)
     generos_cnt = Counter(rows_g)
-    top5_gen_cat = generos_cnt.most_common(TOP)   # [(nombre, n), ...]
+    top5_gen_cat = generos_cnt.most_common(TOP)
 
     # Géneros por popularidad
     rows_gp = []
@@ -216,6 +217,7 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     # Países por producción
     paises_s = df["country"].dropna().str.split(", ").explode().str.strip()
     top5_paises_prod = paises_s.value_counts().head(TOP)
+    top5_paises_prod_list = list(zip(top5_paises_prod.index, top5_paises_prod.values))
 
     # Países por popularidad
     rows_cp = []
@@ -232,159 +234,180 @@ def generar_infografia_png(tipo, year_range, top_n=5):
         top5_paises_pop = []
 
     # ── helpers ──────────────────────────────────────────────────────
-    def clean_ax(ax, bg=BG_CARD):
-        """Tarjeta sin bordes: fondo blanco, spines ocultos."""
+
+    def card_ax(ax, bg=BG_CARD, border=BORDER):
+        """Tarjeta con fondo blanco y borde sutil."""
         ax.set_facecolor(bg)
         for sp in ax.spines.values():
-            sp.set_visible(False)
+            sp.set_visible(True)
+            sp.set_edgecolor(border)
+            sp.set_linewidth(0.8)
         ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
 
-    def hbar_chart(ax, labels, values, color, title, fmt_fn=None, bg=BG_CARD):
-        """Gráfico de barras horizontales estilizado sin ejes."""
-        clean_ax(ax, bg)
-        if not labels:
-            ax.text(0.5, 0.5, "Sin datos", ha="center", va="center",
-                    fontsize=9, color=MUTED, transform=ax.transAxes)
-            ax.set_title(title, fontsize=9, fontweight="bold", color=TEXT2,
-                         pad=6, loc="left", fontfamily="DejaVu Sans")
-            return
-
-        n      = len(labels)
-        y_pos  = range(n)
-        maxv   = max(values) if values else 1
-
-        # Barras de fondo (track)
-        ax.barh(y_pos, [maxv * 1.0] * n, color=DIVIDER, height=0.55, zorder=1)
-        # Barras de dato con intensidad proporcional
-        bar_colors = [
-            plt.matplotlib.colors.to_rgba(color, alpha=0.4 + 0.6 * (v / maxv))
-            for v in values
-        ]
-        bars = ax.barh(y_pos, values, color=bar_colors, height=0.55, zorder=2)
-
-        # Etiquetas de nombre (izquierda dentro de la barra de fondo)
-        for i, (lbl, val) in enumerate(zip(labels, values)):
-            ax.text(-maxv * 0.01, i, lbl,
-                    ha="right", va="center", fontsize=8.5,
-                    color=TEXT, fontfamily="DejaVu Sans", fontweight="bold" if i == n-1 else "normal")
-            txt = fmt_fn(val) if fmt_fn else f"{val:.1f}"
-            ax.text(val + maxv * 0.02, i, txt,
-                    ha="left", va="center", fontsize=8,
-                    color=TEXT2, fontfamily="DejaVu Sans")
-
-        ax.set_xlim(-maxv * 0.38, maxv * 1.18)
-        ax.set_ylim(-0.6, n - 0.4)
-        ax.set_yticks([])
-        ax.set_xticks([])
-        ax.set_title(title, fontsize=9, fontweight="bold", color=TEXT2,
-                     pad=6, loc="left", fontfamily="DejaVu Sans")
-
-    def kpi_card(ax, value_str, label_str, sub_str, color, bg=BG_CARD):
-        """Tarjeta KPI compacta."""
-        clean_ax(ax, bg)
+    def kpi_card(ax, value_str, label_str, sub_str, color):
+        """Tarjeta KPI: barra de color izquierda + número grande."""
+        card_ax(ax)
         ax.set_xlim(0, 1); ax.set_ylim(0, 1)
         # Barra de acento izquierda
-        ax.add_patch(plt.Rectangle((0, 0), 0.045, 1,
-                                    transform=ax.transAxes,
-                                    facecolor=color, clip_on=False))
-        ax.text(0.12, 0.64, value_str, ha="left", va="center",
-                fontsize=30, fontweight="bold", color=color,
-                fontfamily="DejaVu Sans", transform=ax.transAxes)
-        ax.text(0.12, 0.32, label_str, ha="left", va="center",
-                fontsize=8.5, fontweight="bold", color=TEXT2,
-                fontfamily="DejaVu Sans", transform=ax.transAxes)
+        rect = plt.Rectangle((0, 0), 0.038, 1, transform=ax.transAxes,
+                              facecolor=color, clip_on=False, zorder=3)
+        ax.add_patch(rect)
+        ax.text(0.10, 0.63, value_str,
+                ha="left", va="center", fontsize=32, fontweight="bold",
+                color=color, fontfamily="DejaVu Sans", transform=ax.transAxes)
+        ax.text(0.10, 0.30, label_str,
+                ha="left", va="center", fontsize=8.5, fontweight="bold",
+                color=TEXT2, fontfamily="DejaVu Sans", transform=ax.transAxes)
         if sub_str:
-            ax.text(0.12, 0.13, sub_str, ha="left", va="center",
-                    fontsize=7.5, color=MUTED,
+            ax.text(0.10, 0.12, sub_str,
+                    ha="left", va="center", fontsize=7.5,
+                    color=MUTED, fontfamily="DejaVu Sans", transform=ax.transAxes)
+
+    # Colores de badge por posición (1=más saturado → 5=más suave)
+    BADGE_ALPHA = [1.0, 0.82, 0.64, 0.50, 0.38]
+
+    def ranking_card(ax, items, color, title, fmt_fn=None):
+        """
+        Lista de ranking 1→5 con círculo numerado + nombre + valor.
+        items: [(nombre, valor), ...] ya ordenados de mayor a menor.
+        """
+        card_ax(ax)
+        ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
+
+        # Título de sección
+        ax.text(0.5, 0.955, title,
+                ha="center", va="top", fontsize=9, fontweight="bold",
+                color=TEXT2, fontfamily="DejaVu Sans", transform=ax.transAxes)
+        # Línea bajo el título
+        ax.axhline(0.915, color=DIVIDER, linewidth=0.8, xmin=0.04, xmax=0.96)
+
+        if not items:
+            ax.text(0.5, 0.5, "Sin datos", ha="center", va="center",
+                    fontsize=9, color=MUTED, transform=ax.transAxes)
+            return
+
+        n     = len(items)
+        # Espacio disponible entre 0.89 y 0.04
+        y_top = 0.875
+        step  = (y_top - 0.04) / max(n, 1)
+
+        for i, (nombre, valor) in enumerate(items):
+            rank  = i + 1
+            yc    = y_top - i * step - step * 0.42  # centro de la fila
+            alpha = BADGE_ALPHA[i] if i < len(BADGE_ALPHA) else 0.35
+
+            # ── Círculo badge
+            cx, cy = 0.095, yc
+            r = 0.048
+            circ = plt.Circle((cx, cy), r, transform=ax.transAxes,
+                               facecolor=plt.matplotlib.colors.to_rgba(color, alpha),
+                               edgecolor=color, linewidth=1.0, zorder=3,
+                               clip_on=False)
+            ax.add_patch(circ)
+            ax.text(cx, cy, str(rank),
+                    ha="center", va="center", fontsize=9, fontweight="bold",
+                    color="white" if alpha > 0.55 else color,
+                    fontfamily="DejaVu Sans", transform=ax.transAxes, zorder=4)
+
+            # ── Nombre
+            ax.text(0.175, yc + 0.025, nombre,
+                    ha="left", va="center",
+                    fontsize=9 if rank == 1 else 8.5,
+                    fontweight="bold" if rank == 1 else "normal",
+                    color=TEXT if rank == 1 else TEXT2,
                     fontfamily="DejaVu Sans", transform=ax.transAxes)
 
-    # ── Canvas: layout 5 filas × 2 columnas, sin fila vacía ─────────
-    # Eliminado: gráfico "top países popularidad" y fila placeholder
-    # Ahora: header | KPIs | géneros (2 col) | países producción (full) | footer
-    fig = plt.figure(figsize=(10, 12), facecolor=BG)
+            # ── Valor (alineado a la derecha)
+            txt = fmt_fn(valor) if fmt_fn else f"{valor:.1f}"
+            ax.text(0.965, yc + 0.025, txt,
+                    ha="right", va="center", fontsize=8.5,
+                    color=color if rank == 1 else MUTED,
+                    fontfamily="DejaVu Sans", transform=ax.transAxes,
+                    fontweight="bold" if rank == 1 else "normal")
+
+            # ── Línea separadora sutil (excepto última)
+            if i < n - 1:
+                ax.axhline(yc - step * 0.42, color=DIVIDER,
+                           linewidth=0.5, xmin=0.04, xmax=0.96)
+
+    # ── Canvas: 5 filas × 2 cols ────────────────────────────────────
+    # Row 0: header (con padding)   height_ratio 0.80
+    # Row 1: 2 KPIs                 height_ratio 0.95
+    # Row 2: géneros pop | géneros cat   1.80
+    # Row 3: países prod | países pop    1.80
+    # Row 4: footer                 0.26
+    fig = plt.figure(figsize=(10, 14), facecolor=BG)
     fig.patch.set_facecolor(BG)
 
     gs = GridSpec(
         5, 2,
         figure=fig,
-        left=0.03, right=0.97,
-        top=0.96, bottom=0.05,
-        hspace=0.42, wspace=0.12,
-        height_ratios=[0.60, 0.90, 2.0, 2.0, 0.28]
+        left=0.04, right=0.96,
+        top=0.935, bottom=0.04,   # top<1 → margen superior real
+        hspace=0.38, wspace=0.10,
+        height_ratios=[0.80, 0.95, 1.80, 1.80, 0.26]
     )
 
-    # ── ROW 0: Cabecera ──────────────────────────────────────────────
+    # ── ROW 0: Cabecera (con margen superior gracias a top=0.935) ────
     ax_h = fig.add_subplot(gs[0, :])
     ax_h.set_facecolor(BG); ax_h.axis("off")
     ax_h.set_xlim(0, 1); ax_h.set_ylim(0, 1)
 
-    ax_h.text(0.0, 0.95, "STREAMVIEW ANALYTICS",
-              ha="left", va="top", fontsize=20, fontweight="bold",
+    # Lado izquierdo
+    ax_h.text(0.0, 0.82, "STREAMVIEW ANALYTICS",
+              ha="left", va="top", fontsize=21, fontweight="bold",
               color=ACCENT, fontfamily="DejaVu Sans", transform=ax_h.transAxes)
-    ax_h.text(0.0, 0.30, "Resumen del catálogo",
+    ax_h.text(0.0, 0.28, "Resumen del catálogo",
               ha="left", va="top", fontsize=10, color=TEXT2,
               fontfamily="DejaVu Sans", transform=ax_h.transAxes)
 
-    # Filtro/rango — dos líneas: etiqueta pequeña arriba, años grandes abajo
-    ax_h.text(1.0, 0.95, tipo_label,
-              ha="right", va="top", fontsize=9, color=MUTED,
+    # Lado derecho: filtro (pequeño) + rango de años (grande)
+    ax_h.text(1.0, 0.82, tipo_label,
+              ha="right", va="top", fontsize=9.5, color=MUTED,
               fontfamily="DejaVu Sans", transform=ax_h.transAxes)
-    ax_h.text(1.0, 0.48, f"{y0} – {y1}",
-              ha="right", va="top", fontsize=18, fontweight="bold", color=TEXT2,
-              fontfamily="DejaVu Sans", transform=ax_h.transAxes)
+    ax_h.text(1.0, 0.38, f"{y0} – {y1}",
+              ha="right", va="top", fontsize=20, fontweight="bold",
+              color=TEXT2, fontfamily="DejaVu Sans", transform=ax_h.transAxes)
 
     ax_h.axhline(0.0, color=DIVIDER, linewidth=1.5, xmin=0, xmax=1)
 
     # ── ROW 1: KPIs ──────────────────────────────────────────────────
     ax_k1 = fig.add_subplot(gs[1, 0])
     ax_k2 = fig.add_subplot(gs[1, 1])
-
     kpi_card(ax_k1, f"{total:,}", "TÍTULOS EN EL CATÁLOGO", kpi_sub, ACCENT)
     kpi_card(ax_k2, f"{val_avg:.1f}", "CALIFICACIÓN PROMEDIO", "sobre 10 puntos", GREEN)
 
-    for ax_kpi in [ax_k1, ax_k2]:
-        ax_kpi.set_facecolor(BG_CARD)
-        for sp in ax_kpi.spines.values():
-            sp.set_visible(False)
-
-    # ── ROW 2: Géneros ───────────────────────────────────────────────
+    # ── ROW 2: Géneros (2×1) ─────────────────────────────────────────
     ax_gp = fig.add_subplot(gs[2, 0])
     ax_gc = fig.add_subplot(gs[2, 1])
 
-    names_gp = [x[0] for x in top5_gen_pop] if top5_gen_pop else []
-    vals_gp  = [x[1] for x in top5_gen_pop] if top5_gen_pop else []
-    names_gc = [x[0] for x in top5_gen_cat] if top5_gen_cat else []
-    vals_gc  = [x[1] for x in top5_gen_cat] if top5_gen_cat else []
+    ranking_card(ax_gp, top5_gen_pop, ACCENT,
+                 "TOP GÉNEROS · POPULARIDAD",
+                 fmt_fn=lambda v: f"{v:.1f}")
+    ranking_card(ax_gc, top5_gen_cat, TEAL,
+                 "TOP GÉNEROS · CATÁLOGO",
+                 fmt_fn=lambda v: f"{int(v):,}")
 
-    hbar_chart(ax_gp, names_gp, vals_gp, ACCENT,
-               "Top géneros · popularidad",
-               fmt_fn=lambda v: f"{v:.1f}")
-    hbar_chart(ax_gc, names_gc, vals_gc, TEAL,
-               "Top géneros · catálogo",
-               fmt_fn=lambda v: f"{int(v):,}")
+    # ── ROW 3: Países (2×1) ──────────────────────────────────────────
+    ax_pp   = fig.add_subplot(gs[3, 0])
+    ax_ppop = fig.add_subplot(gs[3, 1])
 
-    # ── ROW 3: Países producción (full width) ────────────────────────
-    ax_pp = fig.add_subplot(gs[3, :])
+    ranking_card(ax_pp, top5_paises_prod_list, BLUE,
+                 "TOP PAÍSES · PRODUCCIÓN",
+                 fmt_fn=lambda v: f"{int(v):,}")
+    ranking_card(ax_ppop, top5_paises_pop, AMBER,
+                 "TOP PAÍSES · POPULARIDAD",
+                 fmt_fn=lambda v: f"{v:.1f}")
 
-    if len(top5_paises_prod) > 0:
-        names_pp = list(top5_paises_prod.index)
-        vals_pp  = list(top5_paises_prod.values)
-    else:
-        names_pp, vals_pp = [], []
-
-    hbar_chart(ax_pp, names_pp, vals_pp, BLUE,
-               "Top países · producción",
-               fmt_fn=lambda v: f"{int(v):,}")
-
-    # ── ROW 4: Pie de página ─────────────────────────────────────────
+    # ── ROW 4: Footer ────────────────────────────────────────────────
     ax_foot = fig.add_subplot(gs[4, :])
     ax_foot.set_facecolor(BG); ax_foot.axis("off")
     ax_foot.set_xlim(0, 1); ax_foot.set_ylim(0, 1)
-    ax_foot.axhline(0.98, color=DIVIDER, linewidth=0.8, xmin=0, xmax=1)
-    ax_foot.text(0.5, 0.40,
+    ax_foot.axhline(0.92, color=DIVIDER, linewidth=0.8, xmin=0, xmax=1)
+    ax_foot.text(0.5, 0.35,
                  "Fuente: TMDB  ·  ADY1104 Visualización de Datos  ·  Duoc UC 2026",
-                 ha="center", va="center", fontsize=7,
-                 color=MUTED, fontfamily="DejaVu Sans", transform=ax_foot.transAxes)
+                 ha="center", va="center", fontsize=7, color=MUTED,
+                 fontfamily="DejaVu Sans", transform=ax_foot.transAxes)
 
     # ── Exportar
     buf = io.BytesIO()
