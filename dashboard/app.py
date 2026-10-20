@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import Dash, dcc, html, Input, Output, State, ctx
+from dash import Dash, dcc, html, Input, Output, State, ctx, dash_table
 import dash_bootstrap_components as dbc
 
 warnings.filterwarnings("ignore")
@@ -59,6 +59,11 @@ DATA_DIR = os.path.join(BASE_DIR, "data")
 movies = pd.read_csv(os.path.join(DATA_DIR, "netflix_movies_detailed_up_to_2025.csv"))
 shows  = pd.read_csv(os.path.join(DATA_DIR, "netflix_tv_shows_detailed_up_to_2025.csv"))
 
+# 9 show_ids duplicados en shows (snapshots TMDB distintos, mismos metadatos).
+# Criterio: conservar el registro con mayor popularidad.
+if shows["show_id"].duplicated().any():
+    shows = shows.sort_values("popularity", ascending=False).drop_duplicates(subset="show_id", keep="first")
+
 for df, label in [(movies,"Película"), (shows,"Serie")]:
     df["date_added"] = pd.to_datetime(df["date_added"], errors="coerce")
     df["year_added"] = df["date_added"].dt.year
@@ -75,6 +80,8 @@ COMMON = ["show_id","type","type_label","title","country","year_added",
           "release_year","genres","language","lang_label",
           "popularity","vote_count","vote_average","rating_bin"]
 combined = pd.concat([movies[COMMON], shows[COMMON]], ignore_index=True)
+# uid compuesto para no confundir películas y series con el mismo show_id
+combined["uid"] = combined["type_label"].str[:3] + "_" + combined["show_id"].astype(str)
 
 YEAR_MIN = int(combined["year_added"].min())
 YEAR_MAX = int(combined["year_added"].max())
@@ -149,12 +156,6 @@ def kpi_card(label, value, subtitle="", color=C_ACCENT1, icon=""):
 # GENERADOR DE INFOGRAFÍA
 # ══════════════════════════════════════════════════════════════════
 def generar_infografia_png(tipo, year_range, top_n=5):
-    """
-    Infografía dashboard: fondo #F8F9FA, tarjetas con borde sutil,
-    rankings visuales con círculos numerados del 1 al 5.
-    Layout: header | 2 KPIs | 2×2 rankings | footer
-    Formato: 10×14 pulgadas a 130 dpi.
-    """
     from collections import Counter
     from matplotlib.gridspec import GridSpec
     import matplotlib.patches as mpatches_local
@@ -165,7 +166,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     y0 = int(year_range[0]) if year_range else YEAR_MIN
     y1 = int(year_range[1]) if year_range else YEAR_MAX
 
-    # ── Paleta
     BG       = "#F8F9FA"
     BG_CARD  = "#FFFFFF"
     ACCENT   = "#7C3AED"
@@ -181,7 +181,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
 
     tipo_label = tipo if tipo and tipo != "Todos" else "Catálogo completo"
 
-    # ── Datos
     total   = len(df)
     n_pel   = int(len(df[df["type_label"] == "Película"]))
     n_ser   = int(len(df[df["type_label"] == "Serie"]))
@@ -194,7 +193,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     else:
         kpi_sub = f"{n_pel:,} películas  ·  {n_ser:,} series"
 
-    # Géneros por catálogo
     rows_g = []
     for _, row in df.dropna(subset=["genres"]).iterrows():
         for g in row["genres"].split(", "):
@@ -202,7 +200,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     generos_cnt = Counter(rows_g)
     top5_gen_cat = generos_cnt.most_common(TOP)
 
-    # Géneros por popularidad
     rows_gp = []
     for _, row in df.dropna(subset=["genres"]).iterrows():
         for g in row["genres"].split(", "):
@@ -214,12 +211,10 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     else:
         top5_gen_pop = []
 
-    # Países por producción
     paises_s = df["country"].dropna().str.split(", ").explode().str.strip()
     top5_paises_prod = paises_s.value_counts().head(TOP)
     top5_paises_prod_list = list(zip(top5_paises_prod.index, top5_paises_prod.values))
 
-    # Países por popularidad
     rows_cp = []
     for _, row in df.dropna(subset=["country"]).iterrows():
         for c in row["country"].split(", "):
@@ -233,10 +228,7 @@ def generar_infografia_png(tipo, year_range, top_n=5):
     else:
         top5_paises_pop = []
 
-    # ── helpers ──────────────────────────────────────────────────────
-
     def card_ax(ax, bg=BG_CARD, border=BORDER):
-        """Tarjeta con fondo blanco y borde sutil."""
         ax.set_facecolor(bg)
         for sp in ax.spines.values():
             sp.set_visible(True)
@@ -244,11 +236,9 @@ def generar_infografia_png(tipo, year_range, top_n=5):
             sp.set_linewidth(0.8)
         ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
 
-    def kpi_card(ax, value_str, label_str, sub_str, color):
-        """Tarjeta KPI: barra de color izquierda + número grande."""
+    def kpi_card_ax(ax, value_str, label_str, sub_str, color):
         card_ax(ax)
         ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-        # Barra de acento izquierda
         rect = plt.Rectangle((0, 0), 0.038, 1, transform=ax.transAxes,
                               facecolor=color, clip_on=False, zorder=3)
         ax.add_patch(rect)
@@ -263,22 +253,15 @@ def generar_infografia_png(tipo, year_range, top_n=5):
                     ha="left", va="center", fontsize=7.5,
                     color=MUTED, fontfamily="DejaVu Sans", transform=ax.transAxes)
 
-    # Colores de badge por posición (1=más saturado → 5=más suave)
     BADGE_ALPHA = [1.0, 0.82, 0.64, 0.50, 0.38]
 
     def ranking_card(ax, items, color, title, fmt_fn=None):
-        """
-        Lista de ranking 1→5 con círculo numerado + nombre + valor.
-        items: [(nombre, valor), ...] ya ordenados de mayor a menor.
-        """
         card_ax(ax)
         ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
 
-        # Título de sección
         ax.text(0.5, 0.955, title,
                 ha="center", va="top", fontsize=9, fontweight="bold",
                 color=TEXT2, fontfamily="DejaVu Sans", transform=ax.transAxes)
-        # Línea bajo el título
         ax.axhline(0.915, color=DIVIDER, linewidth=0.8, xmin=0.04, xmax=0.96)
 
         if not items:
@@ -287,16 +270,14 @@ def generar_infografia_png(tipo, year_range, top_n=5):
             return
 
         n     = len(items)
-        # Espacio disponible entre 0.89 y 0.04
         y_top = 0.875
         step  = (y_top - 0.04) / max(n, 1)
 
         for i, (nombre, valor) in enumerate(items):
             rank  = i + 1
-            yc    = y_top - i * step - step * 0.42  # centro de la fila
+            yc    = y_top - i * step - step * 0.42
             alpha = BADGE_ALPHA[i] if i < len(BADGE_ALPHA) else 0.35
 
-            # ── Círculo badge
             cx, cy = 0.095, yc
             r = 0.048
             circ = plt.Circle((cx, cy), r, transform=ax.transAxes,
@@ -309,7 +290,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
                     color="white" if alpha > 0.55 else color,
                     fontfamily="DejaVu Sans", transform=ax.transAxes, zorder=4)
 
-            # ── Nombre
             ax.text(0.175, yc + 0.025, nombre,
                     ha="left", va="center",
                     fontsize=9 if rank == 1 else 10.5,
@@ -317,7 +297,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
                     color=TEXT if rank == 1 else TEXT2,
                     fontfamily="DejaVu Sans", transform=ax.transAxes)
 
-            # ── Valor (alineado a la derecha)
             txt = fmt_fn(valor) if fmt_fn else f"{valor:.1f}"
             ax.text(0.965, yc + 0.025, txt,
                     ha="right", va="center", fontsize=10.5,
@@ -325,17 +304,10 @@ def generar_infografia_png(tipo, year_range, top_n=5):
                     fontfamily="DejaVu Sans", transform=ax.transAxes,
                     fontweight="bold" if rank == 1 else "normal")
 
-            # ── Línea separadora sutil (excepto última)
             if i < n - 1:
                 ax.axhline(yc - step * 0.42, color=DIVIDER,
                            linewidth=0.5, xmin=0.04, xmax=0.96)
 
-    # ── Canvas: 5 filas × 2 cols ────────────────────────────────────
-    # Row 0: header (con padding)   height_ratio 0.80
-    # Row 1: 2 KPIs                 height_ratio 0.95
-    # Row 2: géneros pop | géneros cat   1.80
-    # Row 3: países prod | países pop    1.80
-    # Row 4: footer                 0.26
     fig = plt.figure(figsize=(10, 14), facecolor=BG)
     fig.patch.set_facecolor(BG)
 
@@ -343,17 +315,15 @@ def generar_infografia_png(tipo, year_range, top_n=5):
         5, 2,
         figure=fig,
         left=0.04, right=0.96,
-        top=0.935, bottom=0.04,   # top<1 → margen superior real
+        top=0.935, bottom=0.04,
         hspace=0.38, wspace=0.10,
         height_ratios=[0.80, 0.95, 1.80, 1.80, 0.26]
     )
 
-    # ── ROW 0: Cabecera (con margen superior gracias a top=0.935) ────
     ax_h = fig.add_subplot(gs[0, :])
     ax_h.set_facecolor(BG); ax_h.axis("off")
     ax_h.set_xlim(0, 1); ax_h.set_ylim(0, 1)
 
-    # Lado izquierdo
     ax_h.text(0.0, 0.82, "STREAMVIEW ANALYTICS",
               ha="left", va="top", fontsize=21, fontweight="bold",
               color=ACCENT, fontfamily="DejaVu Sans", transform=ax_h.transAxes)
@@ -361,7 +331,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
               ha="left", va="top", fontsize=10, color=TEXT2,
               fontfamily="DejaVu Sans", transform=ax_h.transAxes)
 
-    # Lado derecho: filtro (pequeño) + rango de años (grande)
     ax_h.text(1.0, 0.82, tipo_label,
               ha="right", va="top", fontsize=9.5, color=MUTED,
               fontfamily="DejaVu Sans", transform=ax_h.transAxes)
@@ -371,13 +340,11 @@ def generar_infografia_png(tipo, year_range, top_n=5):
 
     ax_h.axhline(0.0, color=DIVIDER, linewidth=1.5, xmin=0, xmax=1)
 
-    # ── ROW 1: KPIs ──────────────────────────────────────────────────
     ax_k1 = fig.add_subplot(gs[1, 0])
     ax_k2 = fig.add_subplot(gs[1, 1])
-    kpi_card(ax_k1, f"{total:,}", "TÍTULOS EN EL CATÁLOGO", kpi_sub, ACCENT)
-    kpi_card(ax_k2, f"{val_avg:.1f}", "CALIFICACIÓN PROMEDIO", "sobre 10 puntos", GREEN)
+    kpi_card_ax(ax_k1, f"{total:,}", "TÍTULOS EN EL CATÁLOGO", kpi_sub, ACCENT)
+    kpi_card_ax(ax_k2, f"{val_avg:.1f}", "CALIFICACIÓN PROMEDIO", "sobre 10 puntos", GREEN)
 
-    # ── ROW 2: Géneros (2×1) ─────────────────────────────────────────
     ax_gp = fig.add_subplot(gs[2, 0])
     ax_gc = fig.add_subplot(gs[2, 1])
 
@@ -388,7 +355,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
                  "TOP GÉNEROS · POPULARIDAD",
                  fmt_fn=lambda v: f"{v:.1f}")
 
-    # ── ROW 3: Países (2×1) ──────────────────────────────────────────
     ax_pp   = fig.add_subplot(gs[3, 0])
     ax_ppop = fig.add_subplot(gs[3, 1])
 
@@ -399,7 +365,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
                  "TOP PAÍSES · POPULARIDAD",
                  fmt_fn=lambda v: f"{v:.1f}")
 
-    # ── ROW 4: Footer ────────────────────────────────────────────────
     ax_foot = fig.add_subplot(gs[4, :])
     ax_foot.set_facecolor(BG); ax_foot.axis("off")
     ax_foot.set_xlim(0, 1); ax_foot.set_ylim(0, 1)
@@ -409,7 +374,6 @@ def generar_infografia_png(tipo, year_range, top_n=5):
                  ha="center", va="center", fontsize=7, color=MUTED,
                  fontfamily="DejaVu Sans", transform=ax_foot.transAxes)
 
-    # ── Exportar
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=130, bbox_inches="tight",
                 facecolor=BG, edgecolor="none")
@@ -429,6 +393,22 @@ app = Dash(__name__,
            title="StreamView Analytics")
 server = app.server
 
+# Scrollbar discreta para el sidebar — CSS inyectado sin archivo externo
+app.index_string = app.index_string.replace(
+    "</head>",
+    """<style>
+.sv-sidebar::-webkit-scrollbar { width: 4px; }
+.sv-sidebar::-webkit-scrollbar-track { background: transparent; }
+.sv-sidebar::-webkit-scrollbar-thumb {
+    background: var(--border-color-sidebar, #2D3148);
+    border-radius: 4px;
+}
+.sv-sidebar::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted-on-sidebar, #64748B);
+}
+</style></head>"""
+)
+
 # ── SIDEBAR ──────────────────────────────────────────────────────
 sidebar_header = html.Div([
     html.Div([
@@ -447,7 +427,6 @@ sidebar_header = html.Div([
 ], className="sv-sidebar-header", style={"marginBottom":"32px"})
 
 sidebar_body = html.Div([
-    # Sección filtros
     html.Div("FILTROS", style={
         "fontSize":"9px","fontWeight":"700","color":C_MUTED_SIDEBAR,
         "letterSpacing":"1.5px","marginBottom":"14px"
@@ -468,6 +447,9 @@ sidebar_body = html.Div([
     html.Div("Años de incorporación", style={
         "fontSize":"11px","fontWeight":"600","color":C_TEXT_SIDEBAR,"marginBottom":"10px"
     }),
+    html.Div("Filtra por date_added, no por año de estreno.", style={
+        "fontSize":"9px","color":C_MUTED_SIDEBAR,"marginBottom":"6px","lineHeight":"1.4"
+    }),
     dcc.RangeSlider(
         id="filtro-years",
         min=YEAR_MIN, max=YEAR_MAX,
@@ -485,9 +467,34 @@ sidebar_body = html.Div([
         id="filtro-top", min=5, max=20, step=5, value=10,
         marks={5:"5", 10:"10", 15:"15", 20:"20"},
     ),
+    html.Div(style={"marginBottom":"20px"}),
+
+    html.Div("Mín. votos (scatter)", style={
+        "fontSize":"11px","fontWeight":"600","color":C_TEXT_SIDEBAR,"marginBottom":"6px"
+    }),
+    html.Div("Umbral exploratorio, no garantía de representatividad.", style={
+        "fontSize":"9px","color":C_MUTED_SIDEBAR,"marginBottom":"6px","lineHeight":"1.4"
+    }),
+    dcc.Slider(
+        id="filtro-min-votos", min=0, max=200, step=10, value=30,
+        marks={0:"0", 50:"50", 100:"100", 200:"200"},
+        tooltip={"placement":"bottom","always_visible":False},
+    ),
+    html.Div(style={"marginBottom":"20px"}),
+
+    html.Div("Mín. títulos/género", style={
+        "fontSize":"11px","fontWeight":"600","color":C_TEXT_SIDEBAR,"marginBottom":"6px"
+    }),
+    html.Div("Para la matriz de oportunidades.", style={
+        "fontSize":"9px","color":C_MUTED_SIDEBAR,"marginBottom":"6px","lineHeight":"1.4"
+    }),
+    dcc.Slider(
+        id="filtro-min-titulos-genero", min=5, max=100, step=5, value=30,
+        marks={5:"5", 30:"30", 60:"60", 100:"100"},
+        tooltip={"placement":"bottom","always_visible":False},
+    ),
     html.Div(style={"marginBottom":"32px"}),
 
-    # Sección vistas
     html.Div("VISTAS", style={
         "fontSize":"9px","fontWeight":"700","color":C_MUTED_SIDEBAR,
         "letterSpacing":"1.5px","marginBottom":"14px"
@@ -510,7 +517,6 @@ sidebar_body = html.Div([
         style={"marginBottom":"24px"}
     ),
 
-    # Notas
     html.Div(style={"borderTop":"1px solid var(--border-color-sidebar)","marginBottom":"16px"}),
     html.Div("⚠ Popularidad = índice relativo TMDB.", style={
         "fontSize":"10px","color":C_MUTED_SIDEBAR,"lineHeight":"1.5","marginBottom":"6px"
@@ -525,24 +531,28 @@ sidebar = html.Div([
     sidebar_body,
 ], className="sv-sidebar", style={
     "backgroundColor": BG_SIDEBAR,
-    "width":"200px","minHeight":"100vh",
+    "width":"200px",
+    "height":"100vh",          # altura fija = viewport → activa scroll interno
+    "overflowY":"auto",        # scroll con rueda del mouse dentro del sidebar
+    "overflowX":"hidden",
     "padding":"24px 16px",
     "position":"fixed","top":"0","left":"0",
     "borderRight":"1px solid var(--border-color-sidebar)",
     "fontFamily":FONT,
-    "overflowY":"auto",
+    # scrollbar discreta (webkit + scrollbar-width para Firefox)
+    "scrollbarWidth":"thin",
+    "scrollbarColor":"var(--border-color-sidebar) transparent",
 })
 
 # ── LAYOUT PRINCIPAL ─────────────────────────────────────────────
 app.layout = html.Div([
     dcc.Store(id="theme-mode", storage_type="local", data="system"),
     dcc.Store(id="theme-resolved", data="dark"),
+    dcc.Store(id="store-cuadrante", data="Todos"),
 
-    # Componente de descarga — necesario para que dcc.Download funcione
     dcc.Download(id="download-infografia"),
-    dcc.Download(id="download-infografia-pdf"),   # descarga en PDF
+    dcc.Download(id="download-infografia-pdf"),
 
-    # Modal popup de formato
     html.Div([
         html.Div([
             html.P("Elige el formato de descarga", style={
@@ -574,7 +584,6 @@ app.layout = html.Div([
 
     sidebar,
     html.Div([
-        # Header
         html.Div([
             html.Div([
                 html.Div(id="page-title", style={
@@ -584,7 +593,6 @@ app.layout = html.Div([
                     "fontSize":"11px","color":C_MUTED
                 }),
             ]),
-            # Botones de acción: tema + descarga infografía
             html.Div([
                 html.Button("Auto", id="theme-toggle-btn", n_clicks=0, className="sv-theme-toggle"),
                 html.Button(
@@ -592,17 +600,10 @@ app.layout = html.Div([
                     id="btn-descargar-infografia",
                     n_clicks=0,
                     style={
-                        "fontSize":"11px",
-                        "fontWeight":"600",
-                        "color":"#E2E8F0",
-                        "backgroundColor":"#7C3AED",
-                        "border":"none",
-                        "borderRadius":"8px",
-                        "padding":"7px 14px",
-                        "cursor":"pointer",
-                        "marginLeft":"10px",
-                        "letterSpacing":"0.2px",
-                        "transition":"opacity 0.15s",
+                        "fontSize":"11px","fontWeight":"600","color":"#E2E8F0",
+                        "backgroundColor":"#7C3AED","border":"none","borderRadius":"8px",
+                        "padding":"7px 14px","cursor":"pointer","marginLeft":"10px",
+                        "letterSpacing":"0.2px","transition":"opacity 0.15s",
                     }
                 ),
             ], style={"display":"flex","alignItems":"center"}),
@@ -613,10 +614,7 @@ app.layout = html.Div([
             "display":"flex","justifyContent":"space-between","alignItems":"flex-start"
         }),
 
-        # KPIs
         html.Div(id="kpi-row", className="sv-kpi-row", style={"padding":"0 24px","marginBottom":"20px"}),
-
-        # Contenido dinámico
         html.Div(id="tab-content", className="sv-tab-content", style={"padding":"0 24px 32px"}),
 
     ], className="sv-main", style={"marginLeft":"200px","backgroundColor":BG_MAIN,"minHeight":"100vh","fontFamily":FONT}),
@@ -624,7 +622,7 @@ app.layout = html.Div([
 ], style={"backgroundColor":BG_MAIN,"fontFamily":FONT})
 
 
-# ── TEMA (claro / oscuro / automático) ──────────────────────────
+# ── TEMA ─────────────────────────────────────────────────────────
 app.clientside_callback(
     """
     function(n_clicks, mode) {
@@ -723,7 +721,6 @@ def update_kpis(tipo, years):
 
 
 # ── CALLBACK: DESCARGA INFOGRAFÍA ────────────────────────────────
-# Abre/cierra el modal
 @app.callback(
     Output("modal-formato", "style"),
     Input("btn-descargar-infografia", "n_clicks"),
@@ -733,14 +730,12 @@ def update_kpis(tipo, years):
     prevent_initial_call=True,
 )
 def toggle_modal(*_):
-    from dash import ctx
     abierto = {"display":"block","position":"fixed","top":"70px","right":"24px","zIndex":"9999"}
     cerrado = {"display":"none","position":"fixed","top":"70px","right":"24px","zIndex":"9999"}
     if ctx.triggered_id == "btn-descargar-infografia":
         return abierto
     return cerrado
 
-# Descarga PNG
 @app.callback(
     Output("download-infografia", "data"),
     Input("btn-dl-png", "n_clicks"),
@@ -757,7 +752,6 @@ def descargar_png(n_clicks, tipo, year_range, top_n):
     y1 = int(year_range[1]) if year_range else YEAR_MAX
     return dcc.send_bytes(png_bytes, f"streamview_resumen_{tipo_label}_{y0}_{y1}.png")
 
-# Descarga PDF
 @app.callback(
     Output("download-infografia-pdf", "data"),
     Input("btn-dl-pdf", "n_clicks"),
@@ -779,6 +773,18 @@ def descargar_pdf(n_clicks, tipo, year_range, top_n):
     y1 = int(year_range[1]) if year_range else YEAR_MAX
     return dcc.send_bytes(pdf_buf.read(), f"streamview_resumen_{tipo_label}_{y0}_{y1}.pdf")
 
+
+# ── CALLBACK: CUADRANTE ──────────────────────────────────────────
+@app.callback(
+    Output("store-cuadrante", "data"),
+    Input("selector-cuadrante", "value"),
+    prevent_initial_call=True,
+)
+def actualizar_cuadrante(val):
+    return val or "Todos"
+
+
+# ── CALLBACK PRINCIPAL: TABS ─────────────────────────────────────
 @app.callback(
     Output("tab-content","children"),
     Input("nav-tab","value"),
@@ -786,8 +792,11 @@ def descargar_pdf(n_clicks, tipo, year_range, top_n):
     Input("filtro-years","value"),
     Input("filtro-top","value"),
     Input("theme-resolved","data"),
+    Input("filtro-min-votos","value"),
+    Input("filtro-min-titulos-genero","value"),
+    Input("store-cuadrante","data"),
 )
-def render_tab(tab, tipo, years, top_n, theme):
+def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cuadrante_sel):
     df = filtrar(tipo, years)
 
     tc = CHART_THEMES.get(theme, CHART_THEMES["dark"])
@@ -806,13 +815,8 @@ def render_tab(tab, tipo, years, top_n, theme):
         fig_tipo.add_trace(go.Bar(
             x=counts["Cantidad"], y=counts["Tipo"],
             orientation="h",
-            marker=dict(
-                color=colors_tipo,
-                opacity=0.9,
-                line=dict(color="rgba(0,0,0,0)", width=0)
-            ),
-            text=counts["Label"],
-            textposition="outside",
+            marker=dict(color=colors_tipo, opacity=0.9, line=dict(color="rgba(0,0,0,0)", width=0)),
+            text=counts["Label"], textposition="outside",
             textfont=dict(color=C_TEXT, size=11),
             hovertemplate="%{y}: %{x:,}<extra></extra>",
         ))
@@ -837,12 +841,10 @@ def render_tab(tab, tipo, years, top_n, theme):
             marker=dict(
                 color=top_g["Cantidad"],
                 colorscale=[[0, "rgba(124,58,237,0.35)"],[1, C_ACCENT1]],
-                showscale=False,
-                line=dict(color="rgba(0,0,0,0)")
+                showscale=False, line=dict(color="rgba(0,0,0,0)")
             ),
             text=top_g["Cantidad"].apply(lambda x: f"{x:,}"),
-            textposition="outside",
-            textfont=dict(color=C_TEXT, size=10),
+            textposition="outside", textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:,} contenidos<extra></extra>",
         ))
         lay2 = base_layout(f"Top {top_n} géneros — ¿Cuáles dominan el catálogo?", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
@@ -883,10 +885,8 @@ def render_tab(tab, tipo, years, top_n, theme):
     # ══ GEOGRAFÍA ═════════════════════════════════════════════════
     elif tab == "tab-geo":
 
-        # ── Datos compartidos
         paises_s = df["country"].dropna().str.split(", ").explode().str.strip()
 
-        # ── 1. Género más popular por país (gráfico principal) ──────
         rows_cg = []
         for _, row in df.dropna(subset=["country", "genres"]).iterrows():
             pop = row["popularity"]
@@ -900,79 +900,55 @@ def render_tab(tab, tipo, years, top_n, theme):
                         if g:
                             rows_cg.append({"País": c, "Género": g, "popularity": pop})
 
-        # Popularidad promedio por país, coloreada por género dominante
         fig_gen_pais = go.Figure()
         if rows_cg:
             cgdf = pd.DataFrame(rows_cg)
-            # Sólo países con ≥5 títulos
             pais_count = paises_s.value_counts()
             paises_validos = pais_count[pais_count >= 5].index.tolist()
             cgdf = cgdf[cgdf["País"].isin(paises_validos)]
 
             if len(cgdf) > 0:
-                # Popularidad promedio del país (todos sus títulos)
                 pop_pais = (
                     cgdf.groupby("País")["popularity"]
-                    .mean()
-                    .reset_index()
+                    .mean().reset_index()
                     .rename(columns={"popularity": "PopProm"})
                 )
-
-                # Género dominante por país (mayor pop media; desempate alfabético)
                 gpc = (
                     cgdf.groupby(["País", "Género"])["popularity"]
-                    .mean()
-                    .reset_index()
-                    .sort_values(["País", "popularity", "Género"],
-                                 ascending=[True, False, True])
+                    .mean().reset_index()
+                    .sort_values(["País", "popularity", "Género"], ascending=[True, False, True])
                 )
                 genero_dom = (
-                    gpc.groupby("País")
-                    .first()
-                    .reset_index()[["País", "Género"]]
+                    gpc.groupby("País").first().reset_index()[["País", "Género"]]
                 )
-
-                # Unir: popularidad total + género dominante
                 df_plot = pop_pais.merge(genero_dom, on="País")
-
-                # Ordenar de mayor a menor popularidad, tomar top_n
                 df_plot = df_plot.sort_values("PopProm", ascending=False).head(top_n)
-                df_plot = df_plot.sort_values("PopProm")  # ascendente para barras horizontales
+                df_plot = df_plot.sort_values("PopProm")
 
                 fig_gen_pais.add_trace(go.Bar(
-                    x=df_plot["PopProm"],
-                    y=df_plot["País"],
-                    orientation="h",
+                    x=df_plot["PopProm"], y=df_plot["País"], orientation="h",
                     marker=dict(
                         color=df_plot["PopProm"],
                         colorscale=[[0, "rgba(245,166,35,0.35)"], [1, C_HIGHLIGHT]],
-                        showscale=False,
-                        line=dict(color="rgba(0,0,0,0)"),
+                        showscale=False, line=dict(color="rgba(0,0,0,0)"),
                     ),
-                    text=[f"{g}  ·  {v:.1f}"
-                          for g, v in zip(df_plot["Género"], df_plot["PopProm"])],
-                    textposition="outside",
-                    textfont=dict(color=C_TEXT, size=9),
+                    text=[f"{g}  ·  {v:.1f}" for g, v in zip(df_plot["Género"], df_plot["PopProm"])],
+                    textposition="outside", textfont=dict(color=C_TEXT, size=9),
                     hovertemplate=(
-                        "<b>%{y}</b><br>"
-                        "Popularidad promedio: %{x:.1f}<br>"
+                        "<b>%{y}</b><br>Popularidad promedio: %{x:.1f}<br>"
                         "Género dominante: %{customdata}<extra></extra>"
                     ),
                     customdata=df_plot["Género"],
                 ))
-
-                lay_gp = base_layout(
-                    f"Popularidad promedio por país — top {top_n}",
-                    bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER
-                )
+                lay_gp = base_layout(f"Popularidad promedio por país — top {top_n}",
+                                     bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
                 lay_gp["xaxis"]["title"] = "Popularidad promedio (todos los títulos del país)"
                 lay_gp["yaxis"]["title"] = ""
                 lay_gp["xaxis"]["showgrid"] = True
                 lay_gp["margin"] = dict(l=8, r=100, t=48, b=8)
                 lay_gp["showlegend"] = False
                 max_pop = df_plot["PopProm"].max() if len(df_plot) > 0 else 1
-                fig_gen_pais.update_layout(**lay_gp,
-                                           xaxis_range=[0, max_pop * 1.28])
+                fig_gen_pais.update_layout(**lay_gp, xaxis_range=[0, max_pop * 1.28])
             else:
                 lay_gp = base_layout("Popularidad promedio por país",
                                      bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
@@ -992,7 +968,6 @@ def render_tab(tab, tipo, years, top_n, theme):
                 showarrow=False, font=dict(color=C_MUTED, size=13)
             )
 
-        # ── 2. Top N países productores ──────────────────────────────
         top_p = paises_s.value_counts().head(top_n).reset_index()
         top_p.columns = ["País", "Cantidad"]
         top_p = top_p.sort_values("Cantidad")
@@ -1002,12 +977,10 @@ def render_tab(tab, tipo, years, top_n, theme):
             marker=dict(
                 color=top_p["Cantidad"],
                 colorscale=[[0, "rgba(6,182,212,0.3)"], [1, C_ACCENT2]],
-                showscale=False,
-                line=dict(color="rgba(0,0,0,0)")
+                showscale=False, line=dict(color="rgba(0,0,0,0)")
             ),
             text=top_p["Cantidad"].apply(lambda x: f"{x:,}"),
-            textposition="outside",
-            textfont=dict(color=C_TEXT, size=10),
+            textposition="outside", textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:,} títulos<extra></extra>",
         ))
         lay_p = base_layout(f"Top {top_n} países productores",
@@ -1016,10 +989,8 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay_p["yaxis"]["title"] = ""
         lay_p["xaxis"]["showgrid"] = False
         lay_p["margin"] = dict(l=8, r=60, t=44, b=8)
-        fig_paises.update_layout(**lay_p,
-                                 xaxis_range=[0, top_p["Cantidad"].max() * 1.18])
+        fig_paises.update_layout(**lay_p, xaxis_range=[0, top_p["Cantidad"].max() * 1.18])
 
-        # ── 4. Top N idiomas (existente) ─────────────────────────────
         lang_s = df["lang_label"].value_counts().head(top_n).reset_index()
         lang_s.columns = ["Idioma", "Cantidad"]
         lang_s = lang_s.sort_values("Cantidad")
@@ -1029,12 +1000,10 @@ def render_tab(tab, tipo, years, top_n, theme):
             marker=dict(
                 color=lang_s["Cantidad"],
                 colorscale=[[0, "rgba(244,114,182,0.3)"], [1, C_ACCENT3]],
-                showscale=False,
-                line=dict(color="rgba(0,0,0,0)")
+                showscale=False, line=dict(color="rgba(0,0,0,0)")
             ),
             text=lang_s["Cantidad"].apply(lambda x: f"{x:,}"),
-            textposition="outside",
-            textfont=dict(color=C_TEXT, size=10),
+            textposition="outside", textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:,} contenidos<extra></extra>",
         ))
         lay_l = base_layout(f"Top {top_n} idiomas disponibles",
@@ -1043,8 +1012,7 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay_l["yaxis"]["title"] = ""
         lay_l["xaxis"]["showgrid"] = False
         lay_l["margin"] = dict(l=8, r=60, t=44, b=8)
-        fig_lang.update_layout(**lay_l,
-                               xaxis_range=[0, lang_s["Cantidad"].max() * 1.18])
+        fig_lang.update_layout(**lay_l, xaxis_range=[0, lang_s["Cantidad"].max() * 1.18])
 
         nota = html.Div(
             "ℹ Un contenido con coproducción se contabiliza en cada país participante.  "
@@ -1053,13 +1021,11 @@ def render_tab(tab, tipo, years, top_n, theme):
         )
 
         return html.Div([
-            # Gráfico principal: popularidad promedio por país (full width)
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_gen_pais,
                              config={"displayModeBar": False, "responsive": True},
                              style={"height": "420px"}), padding="16px"), width=12),
             ], className="g-3 mb-3"),
-            # Fila secundaria: países productores + idiomas
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_paises,
                              config={"displayModeBar": False, "responsive": True},
@@ -1074,6 +1040,10 @@ def render_tab(tab, tipo, years, top_n, theme):
     # ══ POPULARIDAD ═══════════════════════════════════════════════
     elif tab == "tab-pop":
 
+        min_votos = int(min_votos) if min_votos else 0
+        min_gen   = int(min_titulos_genero) if min_titulos_genero else 30
+
+        # ── Bump chart (existente) ───────────────────────────────
         rows_g_pop = []
         for _, row in df.dropna(subset=["genres"]).iterrows():
             for g in row["genres"].split(", "):
@@ -1112,8 +1082,7 @@ def render_tab(tab, tipo, years, top_n, theme):
                     mode="lines+markers+text",
                     line=dict(color=color_line, width=width_line),
                     marker=dict(color=color_line, size=7),
-                    text=texto,
-                    textposition=pos_texto,
+                    text=texto, textposition=pos_texto,
                     textfont=dict(color=color_line, size=12 if es_lider else 9.5),
                     opacity=op,
                     hovertemplate=f"<b>{r['Género']}</b><br>Puesto por volumen: #{int(r['rank_vol'])}<br>"
@@ -1144,42 +1113,471 @@ def render_tab(tab, tipo, years, top_n, theme):
                 "border":"1px solid rgba(245,166,35,0.35)",
             })
 
-        p95   = df["popularity"].quantile(0.95)
-        df_sc = df[(df["popularity"] <= p95) & (df["vote_average"] > 0)].copy()
-        sample = df_sc.sample(n=min(3500, len(df_sc)), random_state=42)
+        bloque_hallazgo = []
+        if insight_banner is not None:
+            bloque_hallazgo = [
+                insight_banner,
+                dbc.Row([
+                    dbc.Col(card(dcc.Graph(figure=fig_bump, config={"displayModeBar": False, "responsive": True},
+                                 style={"height": "340px"}), padding="16px"), width=12),
+                ], className="g-3 mb-3"),
+            ]
 
-        fig_sc = go.Figure()
-        for tipo_val, color in [("Película",C_MOVIE),("Serie",C_SHOW)]:
-            d = sample[sample["type_label"]==tipo_val]
-            size_norm = (d["vote_count"].fillna(0) / d["vote_count"].max() * 14 + 4).clip(4,14)
-            fig_sc.add_trace(go.Scatter(
-                x=d["popularity"], y=d["vote_average"],
-                mode="markers",
-                name=tipo_val,
-                marker=dict(color=color, size=size_norm, opacity=0.5,
-                            line=dict(color="rgba(0,0,0,0)")),
-                text=d["title"],
-                customdata=d[["vote_count","type_label"]].values,
+        # ────────────────────────────────────────────────────────────
+        # 1. SCATTER POPULARIDAD vs VALORACIÓN (mejorado)
+        # ────────────────────────────────────────────────────────────
+
+        # Elegibles: popularidad > 0, vote_average > 0, vote_count >= min_votos
+        df_elig = df[
+            (df["popularity"] > 0) &
+            (df["vote_average"] > 0) &
+            (df["vote_count"] > 0) &
+            (df["vote_count"] >= min_votos)
+        ].copy()
+
+        n_excluidos_pop = int((df["popularity"] <= 0).sum())
+        n_total_elig = len(df_elig)
+
+        bloques_scatter = []
+
+        if n_total_elig == 0:
+            bloques_scatter.append(
+                card(html.Div("Sin títulos elegibles con los filtros actuales.",
+                              style={"color": C_MUTED, "padding": "40px", "textAlign": "center"}),
+                     padding="16px")
+            )
+        else:
+            # Medianas calculadas sobre el subconjunto elegible completo (no cambian con cuadrante)
+            med_pop = float(df_elig["popularity"].median())
+            med_val = float(df_elig["vote_average"].median())
+
+            # Cuadrante: >= mediana → "alto" (regla consistente: igual a mediana → alto)
+            df_elig = df_elig.copy()
+            df_elig["pop_alta"] = df_elig["popularity"] >= med_pop
+            df_elig["val_alta"] = df_elig["vote_average"] >= med_val
+
+            def nombre_cuadrante(row):
+                if row["pop_alta"] and row["val_alta"]:
+                    return "1 · Destacar"
+                elif not row["pop_alta"] and row["val_alta"]:
+                    return "2 · Descubrimiento"
+                elif row["pop_alta"] and not row["val_alta"]:
+                    return "3 · Revisar expectativas"
+                else:
+                    return "4 · Menor prioridad"
+
+            df_elig["cuadrante"] = df_elig.apply(nombre_cuadrante, axis=1)
+
+            # Verificar que los cuatro cuadrantes tienen datos
+            cuadrantes_con_datos = df_elig["cuadrante"].nunique()
+            if cuadrantes_con_datos < 4:
+                aviso_cuad = html.Div(
+                    f"ℹ Con los filtros actuales solo se forman {cuadrantes_con_datos} cuadrante(s). "
+                    "Ajusta el mínimo de votos o el rango de años.",
+                    style={"fontSize":"10px","color":C_MUTED,"marginBottom":"8px"}
+                )
+            else:
+                aviso_cuad = None
+
+            # Filtrar para resaltar cuadrante seleccionado
+            if cuadrante_sel and cuadrante_sel != "Todos":
+                df_resaltado = df_elig[df_elig["cuadrante"] == cuadrante_sel]
+                df_atenuado  = df_elig[df_elig["cuadrante"] != cuadrante_sel]
+            else:
+                df_resaltado = df_elig
+                df_atenuado  = pd.DataFrame(columns=df_elig.columns)
+
+            COLORES_CUAD = {
+                "1 · Destacar":             C_ACCENT4,
+                "2 · Descubrimiento":       C_ACCENT5,
+                "3 · Revisar expectativas": C_ACCENT6,
+                "4 · Menor prioridad":      C_MUTED,
+            }
+
+            fig_sc = go.Figure()
+
+            # Puntos atenuados (gris, todos los formatos juntos)
+            if len(df_atenuado) > 0:
+                fig_sc.add_trace(go.Scattergl(
+                    x=df_atenuado["popularity"],
+                    y=df_atenuado["vote_average"],
+                    mode="markers",
+                    name="Otros cuadrantes",
+                    marker=dict(color="#64748B", size=5, opacity=0.18,
+                                line=dict(color="rgba(0,0,0,0)")),
+                    hoverinfo="skip",
+                    showlegend=False,
+                ))
+
+            # Puntos resaltados por formato
+            for tipo_val, color_base in [("Película", C_MOVIE), ("Serie", C_SHOW)]:
+                d = df_resaltado[df_resaltado["type_label"] == tipo_val]
+                if len(d) == 0:
+                    continue
+                genres_str = d["genres"].fillna("—")
+                fig_sc.add_trace(go.Scattergl(
+                    x=d["popularity"],
+                    y=d["vote_average"],
+                    mode="markers",
+                    name=tipo_val,
+                    marker=dict(color=color_base, size=6, opacity=0.65,
+                                line=dict(color="rgba(0,0,0,0)")),
+                    customdata=np.column_stack([
+                        d["type_label"].values,
+                        genres_str.values,
+                        d["release_year"].fillna("—").astype(str).values,
+                        d["vote_count"].fillna(0).astype(int).values,
+                        d["cuadrante"].values,
+                    ]),
+                    hovertemplate=(
+                        "<b>%{text}</b><br>"
+                        "Formato: %{customdata[0]}<br>"
+                        "Géneros: %{customdata[1]}<br>"
+                        "Estreno: %{customdata[2]}<br>"
+                        "Popularidad: %{x:.1f}<br>"
+                        "Calificación: %{y:.2f}/10<br>"
+                        "Votos: %{customdata[3]:,}<br>"
+                        "Cuadrante: %{customdata[4]}<extra></extra>"
+                    ),
+                    text=d["title"].values,
+                ))
+
+            # Líneas de mediana
+            fig_sc.add_hline(
+                y=med_val, line_dash="dot", line_color=C_MUTED, opacity=0.6,
+                annotation_text=f"Med. cal. {med_val:.2f}",
+                annotation_font=dict(size=9, color=C_MUTED),
+            )
+            fig_sc.add_vline(
+                x=med_pop, line_dash="dot", line_color=C_MUTED, opacity=0.6,
+                annotation_text=f"Med. pop. {med_pop:.1f}",
+                annotation_font=dict(size=9, color=C_MUTED),
+            )
+
+            lay_sc = base_layout(
+                f"Popularidad vs. Valoración — {n_total_elig:,} títulos elegibles "
+                f"(mín. {min_votos} votos) · medianas relativas al subconjunto",
+                bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER
+            )
+            lay_sc["xaxis"]["title"] = "Popularidad TMDB (escala logarítmica)"
+            lay_sc["xaxis"]["type"] = "log"
+            lay_sc["yaxis"]["title"] = "Calificación (0–10)"
+            lay_sc["yaxis"]["range"] = [0, 10.5]
+            lay_sc["margin"] = dict(l=8, r=16, t=52, b=8)
+            fig_sc.update_layout(**lay_sc)
+
+            # Etiquetas de cuadrantes en las esquinas
+            cuad_labels = [
+                (0.98, 0.98, "Alta pop · Alta cal\nCandidatos para destacar",  "right", "top"),
+                (0.02, 0.98, "Baja pop · Alta cal\nCandidatos para descubrir", "left",  "top"),
+                (0.98, 0.02, "Alta pop · Baja cal\nRevisar expectativas",       "right", "bottom"),
+                (0.02, 0.02, "Baja pop · Baja cal\nMenor prioridad inicial",    "left",  "bottom"),
+            ]
+            for xr, yr, txt, xa, ya in cuad_labels:
+                fig_sc.add_annotation(
+                    xref="paper", yref="paper", x=xr, y=yr, text=txt,
+                    showarrow=False, xanchor=xa, yanchor=ya,
+                    font=dict(size=8, color=C_MUTED),
+                    bgcolor="rgba(0,0,0,0)",
+                )
+
+            # Selector de cuadrante
+            opciones_cuad = [
+                {"label": "Todos", "value": "Todos"},
+                {"label": "1 · Destacar",             "value": "1 · Destacar"},
+                {"label": "2 · Descubrimiento",       "value": "2 · Descubrimiento"},
+                {"label": "3 · Revisar expectativas", "value": "3 · Revisar expectativas"},
+                {"label": "4 · Menor prioridad",      "value": "4 · Menor prioridad"},
+            ]
+
+            selector_cuad = html.Div([
+                html.Span("Cuadrante: ", style={"fontSize":"11px","color":C_MUTED,"marginRight":"8px"}),
+                dcc.Dropdown(
+                    id="selector-cuadrante",
+                    options=opciones_cuad,
+                    value=cuadrante_sel if cuadrante_sel else "Todos",
+                    clearable=False,
+                    style={"width":"220px","fontSize":"11px","display":"inline-block","verticalAlign":"middle"},
+                ),
+            ], style={"display":"flex","alignItems":"center","marginBottom":"8px"})
+
+            # Tabla vinculada
+            if cuadrante_sel and cuadrante_sel != "Todos":
+                df_tabla = df_resaltado.copy()
+                n_cuad = len(df_tabla)
+            else:
+                df_tabla = df_elig.copy()
+                n_cuad = n_total_elig
+
+            df_tabla_show = df_tabla[[
+                "title","type_label","genres","release_year",
+                "popularity","vote_average","vote_count","cuadrante"
+            ]].copy()
+            df_tabla_show.columns = [
+                "Título","Formato","Géneros","Estreno",
+                "Popularidad","Calificación","Votos","Cuadrante"
+            ]
+            df_tabla_show["Popularidad"] = df_tabla_show["Popularidad"].round(1)
+            df_tabla_show["Calificación"] = df_tabla_show["Calificación"].round(2)
+            df_tabla_show["Votos"] = df_tabla_show["Votos"].fillna(0).astype(int)
+            df_tabla_show["Estreno"] = df_tabla_show["Estreno"].fillna("—").astype(str).str.replace(".0","",regex=False)
+            df_tabla_show["Géneros"] = df_tabla_show["Géneros"].fillna("—")
+            df_tabla_show = df_tabla_show.sort_values("Popularidad", ascending=False)
+
+            tabla_style_header = {
+                "backgroundColor": BG_CHART,
+                "color": C_TEXT,
+                "fontWeight": "600",
+                "fontSize": "11px",
+                "border": f"1px solid {C_BORDER}",
+                "fontFamily": FONT,
+            }
+            tabla_style_cell = {
+                "backgroundColor": BG_CHART,
+                "color": C_TEXT,
+                "fontSize": "11px",
+                "border": f"1px solid {C_BORDER}",
+                "fontFamily": FONT,
+                "textOverflow": "ellipsis",
+                "overflow": "hidden",
+                "maxWidth": "200px",
+            }
+
+            conteo_label = html.Div(
+                f"Mostrando {n_cuad:,} de {n_total_elig:,} títulos elegibles"
+                + (f" · cuadrante: {cuadrante_sel}" if cuadrante_sel != "Todos" else ""),
+                style={"fontSize":"10px","color":C_MUTED,"marginBottom":"6px","marginTop":"12px"}
+            )
+
+            tabla_comp = dash_table.DataTable(
+                data=df_tabla_show.to_dict("records"),
+                columns=[{"name": c, "id": c, "deletable": False} for c in df_tabla_show.columns],
+                page_size=10,
+                sort_action="native",
+                filter_action="none",
+                style_header=tabla_style_header,
+                style_cell=tabla_style_cell,
+                style_data_conditional=[
+                    {"if": {"row_index": "odd"}, "backgroundColor": BG_CHART},
+                ],
+                style_table={"overflowX": "auto"},
+            )
+
+            nota_sc = html.Div([
+                html.Span(
+                    f"⚠ Popularidad TMDB ≠ reproducciones ni audiencia. "
+                    f"Calificaciones reflejan quienes votaron, no todos los espectadores. "
+                    f"Dataset muestreado (1.000 registros/año/formato). "
+                    + (f"{n_excluidos_pop} títulos excluidos por popularidad ≤ 0. " if n_excluidos_pop > 0 else "")
+                    + "Los cuadrantes orientan la selección para pruebas de marketing, no predicen el resultado de una campaña."
+                )
+            ], style={"fontSize":"10px","color":C_MUTED,"marginTop":"8px","lineHeight":"1.5"})
+
+            scatter_bloque = [
+                card([
+                    selector_cuad,
+                    aviso_cuad or html.Span(),
+                    dcc.Graph(figure=fig_sc, config={"displayModeBar": False, "responsive": True},
+                              style={"height": "420px"}),
+                    conteo_label,
+                    tabla_comp,
+                    nota_sc,
+                ], padding="16px")
+            ]
+            bloques_scatter = scatter_bloque
+
+        # ────────────────────────────────────────────────────────────
+        # 2. MATRIZ DE OPORTUNIDADES POR GÉNERO
+        # ────────────────────────────────────────────────────────────
+
+        VALID_GENRES_EXCL = {"Unknown", "unknown", ""}
+
+        def construir_genero_df(sub_df):
+            """
+            Por cada género, cuenta títulos únicos (por uid) y calcula mediana de popularidad.
+            Excluye géneros vacíos y 'Unknown'. Filtra por min_gen.
+            Retorna DataFrame con columnas: Género, N_titulos, Med_pop.
+            """
+            rows = []
+            seen = {}  # género -> set de uid
+            for _, row in sub_df.dropna(subset=["genres"]).iterrows():
+                uid = row["uid"]
+                for g in row["genres"].split(", "):
+                    g = g.strip()
+                    if not g or g in VALID_GENRES_EXCL:
+                        continue
+                    if g not in seen:
+                        seen[g] = []
+                    seen[g].append(row["popularity"])
+
+            rows = []
+            for g, pops in seen.items():
+                rows.append({
+                    "Género": g,
+                    "N_titulos": len(pops),
+                    "Med_pop": float(np.median(pops)),
+                })
+            gdf = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["Género","N_titulos","Med_pop"])
+            if len(gdf) > 0:
+                gdf = gdf[gdf["N_titulos"] >= min_gen]
+            return gdf
+
+        # Títulos sin género válido
+        sin_genero = df[
+            df["genres"].isna() |
+            df["genres"].str.strip().isin(VALID_GENRES_EXCL)
+        ]
+        n_sin_genero = len(sin_genero)
+
+        # Determinar qué formatos mostrar
+        tipos_mostrar = []
+        if tipo == "Todos":
+            tipos_mostrar = [("Película", C_MOVIE), ("Serie", C_SHOW)]
+        elif tipo == "Película":
+            tipos_mostrar = [("Película", C_MOVIE)]
+        else:
+            tipos_mostrar = [("Serie", C_SHOW)]
+
+        # Calcular rangos globales para escalas compartidas
+        all_gdfs = {}
+        for tipo_val, _ in tipos_mostrar:
+            sub = df[df["type_label"] == tipo_val]
+            gdf_t = construir_genero_df(sub)
+            all_gdfs[tipo_val] = gdf_t
+
+        non_empty = [g for g in all_gdfs.values() if len(g) > 0]
+        if non_empty:
+            x_max_global = max(g["N_titulos"].max() for g in non_empty) * 1.15
+            y_min_global = min(g["Med_pop"].min() for g in non_empty) * 0.9
+            y_max_global = max(g["Med_pop"].max() for g in non_empty) * 1.12
+        else:
+            x_max_global = y_min_global = y_max_global = 1
+
+        cols_matriz = []
+        for tipo_val, color in tipos_mostrar:
+            gdf_t = all_gdfs[tipo_val]
+
+            fig_mat = go.Figure()
+
+            if len(gdf_t) == 0:
+                lay_m = base_layout(
+                    f"Matriz de oportunidades — {tipo_val}s",
+                    bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER
+                )
+                fig_mat.update_layout(**lay_m)
+                fig_mat.add_annotation(
+                    text=f"Sin géneros con ≥ {min_gen} títulos en el filtro actual.",
+                    xref="paper", yref="paper", x=0.5, y=0.5,
+                    showarrow=False, font=dict(color=C_MUTED, size=12)
+                )
+                cols_matriz.append(
+                    dbc.Col(card(dcc.Graph(figure=fig_mat, config={"displayModeBar":False,"responsive":True},
+                                          style={"height":"380px"}), padding="16px"),
+                            xs=12, lg=12 if len(tipos_mostrar)==1 else 6)
+                )
+                continue
+
+            # Medianas para las líneas divisorias (relativas a este formato)
+            med_n   = float(gdf_t["N_titulos"].median())
+            med_pop = float(gdf_t["Med_pop"].median())
+
+            # Verificar si las medianas permiten 4 zonas útiles
+            n_zonas = gdf_t.apply(
+                lambda r: (int(r["N_titulos"] >= med_n), int(r["Med_pop"] >= med_pop)), axis=1
+            ).apply(tuple).nunique()
+
+            aviso_zonas = None
+            if n_zonas < 4:
+                aviso_zonas = html.Div(
+                    f"ℹ Con los filtros actuales solo se forman {n_zonas} zona(s) distintas.",
+                    style={"fontSize":"9px","color":C_MUTED,"marginBottom":"4px"}
+                )
+
+            fig_mat.add_trace(go.Scatter(
+                x=gdf_t["N_titulos"],
+                y=gdf_t["Med_pop"],
+                mode="markers+text",
+                text=gdf_t["Género"],
+                textposition="top center",
+                textfont=dict(size=8, color=C_TEXT),
+                marker=dict(
+                    color=gdf_t["Med_pop"],
+                    colorscale=[[0, f"rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.35)"],
+                                [1, color]],
+                    size=10,
+                    showscale=False,
+                    line=dict(color=color, width=1),
+                ),
+                customdata=np.column_stack([
+                    gdf_t["N_titulos"].values,
+                    gdf_t["Med_pop"].round(1).values,
+                    np.full(len(gdf_t), tipo_val),
+                ]),
                 hovertemplate=(
                     "<b>%{text}</b><br>"
-                    "Popularidad: %{x:.1f}<br>"
-                    "Calificación: %{y:.2f}/10<br>"
-                    "Votos: %{customdata[0]:,}<extra></extra>"
+                    "Formato: %{customdata[2]}<br>"
+                    "Títulos: %{customdata[0]:,}<br>"
+                    "Popularidad mediana: %{customdata[1]}<extra></extra>"
                 ),
             ))
-        med_pop = float(df_sc["popularity"].median())
-        med_val = float(df_sc["vote_average"].median())
-        fig_sc.add_hline(y=med_val, line_dash="dot", line_color=C_MUTED, opacity=0.5,
-                         annotation_text=f"Med. cal. {med_val:.1f}",
-                         annotation_font=dict(size=9, color=C_MUTED))
-        fig_sc.add_vline(x=med_pop, line_dash="dot", line_color=C_MUTED, opacity=0.5,
-                         annotation_text=f"Med. pop. {med_pop:.0f}",
-                         annotation_font=dict(size=9, color=C_MUTED))
-        lay_sc = base_layout("¿Los más populares son los mejor valorados?", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
-        lay_sc["xaxis"]["title"] = "Popularidad (TMDB)"
-        lay_sc["yaxis"]["title"] = "Calificación (0–10)"
-        lay_sc["yaxis"]["range"] = [0, 10.5]
-        fig_sc.update_layout(**lay_sc)
+
+            # Líneas divisorias
+            fig_mat.add_vline(
+                x=med_n, line_dash="dot", line_color=C_MUTED, opacity=0.5,
+                annotation_text=f"Med. títulos {int(med_n)}",
+                annotation_font=dict(size=8, color=C_MUTED),
+            )
+            fig_mat.add_hline(
+                y=med_pop, line_dash="dot", line_color=C_MUTED, opacity=0.5,
+                annotation_text=f"Med. pop. {med_pop:.1f}",
+                annotation_font=dict(size=8, color=C_MUTED),
+            )
+
+            lay_m = base_layout(
+                f"Matriz de oportunidades — {tipo_val}s (mín. {min_gen} títulos/género)",
+                bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER
+            )
+            lay_m["xaxis"]["title"] = "Títulos en el catálogo (un título puede estar en varios géneros)"
+            lay_m["yaxis"]["title"] = "Popularidad mediana TMDB"
+            lay_m["xaxis"]["range"] = [0, x_max_global]
+            lay_m["yaxis"]["range"] = [y_min_global, y_max_global]
+            lay_m["margin"] = dict(l=8, r=16, t=52, b=8)
+            fig_mat.update_layout(**lay_m)
+
+            # Etiquetas de zonas
+            zona_labels = [
+                (0.98, 0.98, "Muchos títulos\nAlta popularidad",  "right", "top"),
+                (0.02, 0.98, "Pocos títulos\nAlta popularidad",   "left",  "top"),
+                (0.98, 0.02, "Muchos títulos\nBaja popularidad",  "right", "bottom"),
+                (0.02, 0.02, "Pocos títulos\nBaja popularidad",   "left",  "bottom"),
+            ]
+            for xr, yr, txt, xa, ya in zona_labels:
+                fig_mat.add_annotation(
+                    xref="paper", yref="paper", x=xr, y=yr, text=txt,
+                    showarrow=False, xanchor=xa, yanchor=ya,
+                    font=dict(size=8, color=C_MUTED),
+                )
+
+            cols_matriz.append(
+                dbc.Col([
+                    aviso_zonas or html.Span(),
+                    card(dcc.Graph(figure=fig_mat, config={"displayModeBar":False,"responsive":True},
+                                  style={"height":"380px"}), padding="16px"),
+                ], xs=12, lg=12 if len(tipos_mostrar)==1 else 6)
+            )
+
+        nota_matriz = html.Div([
+            html.Span(
+                f"ℹ 'Alto' y 'bajo' son relativos al subconjunto seleccionado, no al mercado general. "
+                f"Pocos títulos + alta popularidad es una señal para explorar, no evidencia de demanda insatisfecha. "
+                f"Un título puede estar en varios géneros; los conteos por género no son sumables como títulos únicos. "
+                + (f"{n_sin_genero:,} título(s) sin género válido excluidos. " if n_sin_genero > 0 else "")
+                + "Popularidad TMDB no equivale a reproducciones, audiencia ni conversión. "
+                "Estos gráficos orientan la selección de contenidos para pruebas de marketing, no predicen el resultado de una campaña."
+            )
+        ], style={"fontSize":"10px","color":C_MUTED,"marginTop":"8px","lineHeight":"1.5"})
+
+        # ── Gráficos existentes (top populares y géneros por popularidad) ──
 
         top_pop_movies = df[(df["vote_average"]>0) & (df["type_label"]=="Película")].nlargest(top_n,"popularity")[
             ["title","popularity","vote_average","type_label"]
@@ -1220,12 +1618,10 @@ def render_tab(tab, tipo, years, top_n, theme):
             marker=dict(
                 color=top_pg["Popularidad promedio"],
                 colorscale=[[0,"rgba(16,185,129,0.3)"],[1,C_ACCENT4]],
-                showscale=False,
-                line=dict(color="rgba(0,0,0,0)")
+                showscale=False, line=dict(color="rgba(0,0,0,0)")
             ),
             text=top_pg["Popularidad promedio"].round(1),
-            textposition="outside",
-            textfont=dict(color=C_TEXT, size=10),
+            textposition="outside", textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:.1f}<extra></extra>",
         ))
         lay_pg = base_layout(f"Top {top_n} géneros por popularidad promedio", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
@@ -1233,14 +1629,7 @@ def render_tab(tab, tipo, years, top_n, theme):
         lay_pg["yaxis"]["title"] = ""
         lay_pg["xaxis"]["showgrid"] = False
         lay_pg["margin"] = dict(l=8, r=50, t=44, b=8)
-        fig_pg.update_layout(**lay_pg,
-                             xaxis_range=[0, top_pg["Popularidad promedio"].max()*1.18])
-
-        nota_pop = html.Div(
-            "⚠ Popularidad = índice relativo TMDB. No equivale a reproducciones. "
-            "Scatter excluye el 5% extremo de popularidad.",
-            style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
-        )
+        fig_pg.update_layout(**lay_pg, xaxis_range=[0, top_pg["Popularidad promedio"].max()*1.18])
 
         rows_cp = []
         for _, row in df.dropna(subset=["country"]).iterrows():
@@ -1259,12 +1648,10 @@ def render_tab(tab, tipo, years, top_n, theme):
             marker=dict(
                 color=top_cp["Calificación promedio"],
                 colorscale=[[0, "rgba(6,182,212,0.3)"],[1, C_ACCENT2]],
-                showscale=False,
-                line=dict(color="rgba(0,0,0,0)")
+                showscale=False, line=dict(color="rgba(0,0,0,0)")
             ),
             text=top_cp["Calificación promedio"].round(2),
-            textposition="outside",
-            textfont=dict(color=C_TEXT, size=10),
+            textposition="outside", textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:.2f}<extra></extra>",
         ))
         lay_cp = base_layout(f"Top {top_n} países con mejor calificación promedio (mín. 30 títulos)", bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
@@ -1279,29 +1666,50 @@ def render_tab(tab, tipo, years, top_n, theme):
             style={"fontSize":"10px","color":C_MUTED,"marginTop":"10px"}
         )
 
-        bloque_hallazgo = []
-        if insight_banner is not None:
-            bloque_hallazgo = [
-                insight_banner,
-                dbc.Row([
-                    dbc.Col(card(dcc.Graph(figure=fig_bump, config={"displayModeBar": False, "responsive": True},
-                                 style={"height": "340px"}), padding="16px"), width=12),
-                ], className="g-3 mb-3"),
-            ]
+        # ── Título de sección para matriz ──
+        titulo_matriz = html.Div([
+            html.Span("Matriz de oportunidades por género", style={
+                "fontSize":"14px","fontWeight":"700","color":C_TEXT
+            }),
+            html.Span(
+                "  ·  Eje X: títulos en catálogo · Eje Y: popularidad mediana · "
+                "Líneas = medianas del subconjunto · No aplica el filtro Top N",
+                style={"fontSize":"10px","color":C_MUTED}
+            ),
+        ], style={"marginBottom":"8px","marginTop":"8px"})
+
+        titulo_scatter = html.Div([
+            html.Span("Popularidad vs. Valoración", style={
+                "fontSize":"14px","fontWeight":"700","color":C_TEXT
+            }),
+            html.Span(
+                "  ·  Escala log en X · Todos los títulos elegibles · No aplica el filtro Top N",
+                style={"fontSize":"10px","color":C_MUTED}
+            ),
+        ], style={"marginBottom":"8px","marginTop":"8px"})
 
         return html.Div([
             *bloque_hallazgo,
+
+            # Scatter mejorado
+            titulo_scatter,
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_sc, config={"displayModeBar":False,"responsive":True},
-                             style={"height":"320px"}), padding="16px"), xs=12, lg=7),
+                dbc.Col(bloques_scatter, width=12),
+            ], className="g-3 mb-3"),
+
+            # Matriz de oportunidades
+            titulo_matriz,
+            dbc.Row(cols_matriz, className="g-3 mb-2"),
+            nota_matriz,
+
+            # Gráficos existentes
+            html.Div(style={"marginTop":"16px"}),
+            dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_pop, config={"displayModeBar":False,"responsive":True},
                              style={"height":"320px"}), padding="16px"), xs=12, lg=5),
-            ], className="g-3 mb-3"),
-            dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_pg, config={"displayModeBar":False,"responsive":True},
-                             style={"height":"280px"}), padding="16px"), width=12),
-            ], className="mb-3"),
-            nota_pop,
+                             style={"height":"320px"}), padding="16px"), xs=12, lg=7),
+            ], className="g-3 mb-3"),
             dbc.Row([
                 dbc.Col(card(dcc.Graph(figure=fig_cp, config={"displayModeBar":False,"responsive":True},
                              style={"height":"280px"}), padding="16px"), width=12),
