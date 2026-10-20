@@ -14,6 +14,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from dash import Dash, dcc, html, Input, Output, State, ctx, dash_table
 import dash_bootstrap_components as dbc
+from functools import lru_cache
 
 warnings.filterwarnings("ignore")
 
@@ -155,231 +156,334 @@ def kpi_card(label, value, subtitle="", color=C_ACCENT1, icon=""):
 # ══════════════════════════════════════════════════════════════════
 # GENERADOR DE INFOGRAFÍA
 # ══════════════════════════════════════════════════════════════════
-def generar_infografia_png(tipo, year_range, top_n=5):
-    from collections import Counter
-    from matplotlib.gridspec import GridSpec
-    import matplotlib.patches as mpatches_local
+def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30):
+    import base64
+    import io
+    import textwrap
 
-    TOP = min(int(top_n) if top_n else 5, 5)
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import pandas as pd
+    from matplotlib.patches import FancyBboxPatch
 
-    df = filtrar(tipo, year_range)
-    y0 = int(year_range[0]) if year_range else YEAR_MIN
-    y1 = int(year_range[1]) if year_range else YEAR_MAX
+    # ── DATOS ──────────────────────────────────────────────
+    df = filtrar(tipo, year_range).copy()
+    df = df.drop_duplicates(["type_label", "show_id"])
 
-    BG       = "#F8F9FA"
-    BG_CARD  = "#FFFFFF"
-    ACCENT   = "#7C3AED"
-    TEAL     = "#06B6D4"
-    GREEN    = "#10B981"
-    BLUE     = "#3B82F6"
-    AMBER    = "#F5A623"
-    TEXT     = "#0F172A"
-    TEXT2    = "#334155"
-    MUTED    = "#94A3B8"
-    DIVIDER  = "#E2E8F0"
-    BORDER   = "#D1D5DB"
+    min_votos = max(0, int(min_votos or 0))
+    for col in ["popularity", "vote_average", "vote_count"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    tipo_label = tipo if tipo and tipo != "Todos" else "Catálogo completo"
+    elegibles = df[
+        (df["popularity"] > 0)
+        & (df["vote_average"] > 0)
+        & (df["vote_count"] > 0)
+        & (df["vote_count"] >= min_votos)
+    ].copy()
 
-    total   = len(df)
-    n_pel   = int(len(df[df["type_label"] == "Película"]))
-    n_ser   = int(len(df[df["type_label"] == "Serie"]))
-    val_avg = df["vote_average"].mean() if total > 0 else 0
+    nombres = [
+        "Explorar descubrimiento",
+        "Candidatos para destacar",
+        "Menor prioridad inicial",
+        "Revisar expectativas",
+    ]
+    conteos = dict.fromkeys(nombres, 0)
+    candidatos = elegibles.iloc[:0]
+    med_pop = med_val = None
 
-    if tipo == "Película":
-        kpi_sub = f"{n_pel:,} películas"
-    elif tipo == "Serie":
-        kpi_sub = f"{n_ser:,} series"
-    else:
-        kpi_sub = f"{n_pel:,} películas  ·  {n_ser:,} series"
+    if not elegibles.empty:
+        med_pop = elegibles["popularity"].median()
+        med_val = elegibles["vote_average"].median()
 
-    rows_g = []
-    for _, row in df.dropna(subset=["genres"]).iterrows():
-        for g in row["genres"].split(", "):
-            rows_g.append(g)
-    generos_cnt = Counter(rows_g)
-    top5_gen_cat = generos_cnt.most_common(TOP)
+        pop_alta = elegibles["popularity"] >= med_pop
+        val_alta = elegibles["vote_average"] >= med_val
 
-    rows_gp = []
-    for _, row in df.dropna(subset=["genres"]).iterrows():
-        for g in row["genres"].split(", "):
-            rows_gp.append({"Género": g, "pop": row["popularity"]})
-    gpdf = pd.DataFrame(rows_gp) if rows_gp else pd.DataFrame(columns=["Género","pop"])
-    if len(gpdf) > 0:
-        _gp = gpdf.groupby("Género")["pop"].mean().nlargest(TOP).reset_index()
-        top5_gen_pop = list(zip(_gp["Género"], _gp["pop"]))
-    else:
-        top5_gen_pop = []
+        elegibles["cuadrante"] = np.select(
+            [
+                ~pop_alta & val_alta,
+                pop_alta & val_alta,
+                ~pop_alta & ~val_alta,
+                pop_alta & ~val_alta,
+            ],
+            nombres,
+            default="Sin clasificar",
+        )
 
-    paises_s = df["country"].dropna().str.split(", ").explode().str.strip()
-    top5_paises_prod = paises_s.value_counts().head(TOP)
-    top5_paises_prod_list = list(zip(top5_paises_prod.index, top5_paises_prod.values))
+        conteos.update(elegibles["cuadrante"].value_counts().to_dict())
+        candidatos = (
+            elegibles[
+                elegibles["cuadrante"] == "Explorar descubrimiento"
+            ]
+            .sort_values(
+                ["vote_count", "vote_average", "title", "show_id"],
+                ascending=[False, False, True, True],
+            )
+            .head(3)
+        )
 
-    rows_cp = []
-    for _, row in df.dropna(subset=["country"]).iterrows():
-        for c in row["country"].split(", "):
-            rows_cp.append({"País": c.strip(), "pop": row["popularity"]})
-    cpdf = pd.DataFrame(rows_cp) if rows_cp else pd.DataFrame(columns=["País","pop"])
-    if len(cpdf) > 0:
-        cp_stats = cpdf.groupby("País")["pop"].agg(["mean","count"]).reset_index()
-        cp_stats = cp_stats[cp_stats["count"] >= 5]
-        _cp = cp_stats.nlargest(TOP, "mean")
-        top5_paises_pop = list(zip(_cp["País"], _cp["mean"]))
-    else:
-        top5_paises_pop = []
-
-    def card_ax(ax, bg=BG_CARD, border=BORDER):
-        ax.set_facecolor(bg)
-        for sp in ax.spines.values():
-            sp.set_visible(True)
-            sp.set_edgecolor(border)
-            sp.set_linewidth(0.8)
-        ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
-
-    def kpi_card_ax(ax, value_str, label_str, sub_str, color):
-        card_ax(ax)
-        ax.set_xlim(0, 1); ax.set_ylim(0, 1)
-        rect = plt.Rectangle((0, 0), 0.038, 1, transform=ax.transAxes,
-                              facecolor=color, clip_on=False, zorder=3)
-        ax.add_patch(rect)
-        ax.text(0.10, 0.63, value_str,
-                ha="left", va="center", fontsize=32, fontweight="bold",
-                color=color, fontfamily="DejaVu Sans", transform=ax.transAxes)
-        ax.text(0.10, 0.30, label_str,
-                ha="left", va="center", fontsize=8.5, fontweight="bold",
-                color=TEXT2, fontfamily="DejaVu Sans", transform=ax.transAxes)
-        if sub_str:
-            ax.text(0.10, 0.12, sub_str,
-                    ha="left", va="center", fontsize=7.5,
-                    color=MUTED, fontfamily="DejaVu Sans", transform=ax.transAxes)
-
-    BADGE_ALPHA = [1.0, 0.82, 0.64, 0.50, 0.38]
-
-    def ranking_card(ax, items, color, title, fmt_fn=None):
-        card_ax(ax)
-        ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.axis("off")
-
-        ax.text(0.5, 0.955, title,
-                ha="center", va="top", fontsize=9, fontweight="bold",
-                color=TEXT2, fontfamily="DejaVu Sans", transform=ax.transAxes)
-        ax.axhline(0.915, color=DIVIDER, linewidth=0.8, xmin=0.04, xmax=0.96)
-
-        if not items:
-            ax.text(0.5, 0.5, "Sin datos", ha="center", va="center",
-                    fontsize=9, color=MUTED, transform=ax.transAxes)
-            return
-
-        n     = len(items)
-        y_top = 0.875
-        step  = (y_top - 0.04) / max(n, 1)
-
-        for i, (nombre, valor) in enumerate(items):
-            rank  = i + 1
-            yc    = y_top - i * step - step * 0.42
-            alpha = BADGE_ALPHA[i] if i < len(BADGE_ALPHA) else 0.35
-
-            cx, cy = 0.095, yc
-            r = 0.048
-            circ = plt.Circle((cx, cy), r, transform=ax.transAxes,
-                               facecolor=plt.matplotlib.colors.to_rgba(color, alpha),
-                               edgecolor=color, linewidth=1.0, zorder=3,
-                               clip_on=False)
-            ax.add_patch(circ)
-            ax.text(cx, cy, str(rank),
-                    ha="center", va="center", fontsize=9, fontweight="bold",
-                    color="white" if alpha > 0.55 else color,
-                    fontfamily="DejaVu Sans", transform=ax.transAxes, zorder=4)
-
-            ax.text(0.175, yc + 0.025, nombre,
-                    ha="left", va="center",
-                    fontsize=9 if rank == 1 else 10.5,
-                    fontweight="bold" if rank == 1 else "normal",
-                    color=TEXT if rank == 1 else TEXT2,
-                    fontfamily="DejaVu Sans", transform=ax.transAxes)
-
-            txt = fmt_fn(valor) if fmt_fn else f"{valor:.1f}"
-            ax.text(0.965, yc + 0.025, txt,
-                    ha="right", va="center", fontsize=10.5,
-                    color=color if rank == 1 else MUTED,
-                    fontfamily="DejaVu Sans", transform=ax.transAxes,
-                    fontweight="bold" if rank == 1 else "normal")
-
-            if i < n - 1:
-                ax.axhline(yc - step * 0.42, color=DIVIDER,
-                           linewidth=0.5, xmin=0.04, xmax=0.96)
-
-    fig = plt.figure(figsize=(10, 14), facecolor=BG)
-    fig.patch.set_facecolor(BG)
-
-    gs = GridSpec(
-        5, 2,
-        figure=fig,
-        left=0.04, right=0.96,
-        top=0.935, bottom=0.04,
-        hspace=0.38, wspace=0.10,
-        height_ratios=[0.80, 0.95, 1.80, 1.80, 0.26]
+    # Géneros: cada título cuenta una vez dentro de cada género.
+    generos = df[
+        ["type_label", "show_id", "genres", "popularity"]
+    ].copy()
+    generos["genero"] = generos["genres"].fillna("").str.split(",")
+    generos = generos.explode("genero")
+    generos["genero"] = generos["genero"].str.strip()
+    generos = generos[generos["genero"].ne("")]
+    generos = generos.drop_duplicates(
+        ["type_label", "show_id", "genero"]
     )
 
-    ax_h = fig.add_subplot(gs[0, :])
-    ax_h.set_facecolor(BG); ax_h.axis("off")
-    ax_h.set_xlim(0, 1); ax_h.set_ylim(0, 1)
+    resumen = (
+        generos.groupby("genero")
+        .agg(
+            cantidad=("show_id", "size"),
+            popularidad=("popularity", "mean"),
+        )
+        .reset_index()
+    )
+    resumen["puesto_pop"] = resumen["popularidad"].rank(
+        ascending=False, method="min"
+    )
+    resumen = resumen.sort_values(
+        ["cantidad", "genero"], ascending=[False, True]
+    )
+    top_generos = resumen.head(3)
 
-    ax_h.text(0.0, 0.82, "STREAMVIEW ANALYTICS",
-              ha="left", va="top", fontsize=21, fontweight="bold",
-              color=ACCENT, fontfamily="DejaVu Sans", transform=ax_h.transAxes)
-    ax_h.text(0.0, 0.28, "Resumen del catálogo",
-              ha="left", va="top", fontsize=10, color=TEXT2,
-              fontfamily="DejaVu Sans", transform=ax_h.transAxes)
+    traducciones = {
+        "Comedy": "Comedia",
+        "Animation": "Animación",
+        "Thriller": "Suspenso",
+        "Action": "Acción",
+        "Family": "Familia",
+        "Mystery": "Misterio",
+        "Horror": "Terror",
+        "Documentary": "Documental",
+        "Adventure": "Aventura",
+        "Science Fiction": "Ciencia ficción",
+        "Fantasy": "Fantasía",
+        "Unknown": "Sin clasificar",
+    }
 
-    ax_h.text(1.0, 0.82, tipo_label,
-              ha="right", va="top", fontsize=9.5, color=MUTED,
-              fontfamily="DejaVu Sans", transform=ax_h.transAxes)
-    ax_h.text(1.0, 0.38, f"{y0} – {y1}",
-              ha="right", va="top", fontsize=20, fontweight="bold",
-              color=TEXT2, fontfamily="DejaVu Sans", transform=ax_h.transAxes)
+    def entero(valor):
+        return f"{int(valor):,}".replace(",", ".")
 
-    ax_h.axhline(0.0, color=DIVIDER, linewidth=1.5, xmin=0, xmax=1)
+    def decimal(valor, cifras=2):
+        return f"{valor:.{cifras}f}".replace(".", ",")
 
-    ax_k1 = fig.add_subplot(gs[1, 0])
-    ax_k2 = fig.add_subplot(gs[1, 1])
-    kpi_card_ax(ax_k1, f"{total:,}", "TÍTULOS EN EL CATÁLOGO", kpi_sub, ACCENT)
-    kpi_card_ax(ax_k2, f"{val_avg:.1f}", "CALIFICACIÓN PROMEDIO", "sobre 10 puntos", GREEN)
+    def envolver(texto, ancho):
+        return textwrap.fill(str(texto), width=ancho)
 
-    ax_gp = fig.add_subplot(gs[2, 0])
-    ax_gc = fig.add_subplot(gs[2, 1])
+    tipo_texto = tipo if tipo and tipo != "Todos" else "Películas y series"
+    inicio, fin = year_range or [YEAR_MIN, YEAR_MAX]
 
-    ranking_card(ax_gp, top5_gen_cat, TEAL,
-                 "TOP GÉNEROS · CATÁLOGO",
-                 fmt_fn=lambda v: f"{int(v):,}")
-    ranking_card(ax_gc, top5_gen_pop, ACCENT,
-                 "TOP GÉNEROS · POPULARIDAD",
-                 fmt_fn=lambda v: f"{v:.1f}")
+    # ── DISEÑO ─────────────────────────────────────────────
+    fondo = "#F5F6FA"
+    tinta = "#192337"
+    secundario = "#566177"
+    morado = "#7C3AED"
+    oscuro = "#17182E"
 
-    ax_pp   = fig.add_subplot(gs[3, 0])
-    ax_ppop = fig.add_subplot(gs[3, 1])
+    fig = plt.figure(figsize=(10, 14), facecolor=fondo)
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis("off")
 
-    ranking_card(ax_pp, top5_paises_prod_list, BLUE,
-                 "TOP PAÍSES · PRODUCCIÓN",
-                 fmt_fn=lambda v: f"{int(v):,}")
-    ranking_card(ax_ppop, top5_paises_pop, AMBER,
-                 "TOP PAÍSES · POPULARIDAD",
-                 fmt_fn=lambda v: f"{v:.1f}")
+    def caja(x, y, w, h, color="white", radio=0.012):
+        ax.add_patch(
+            FancyBboxPatch(
+                (x, y), w, h,
+                boxstyle=f"round,pad=0,rounding_size={radio}",
+                facecolor=color,
+                edgecolor="none",
+            )
+        )
 
-    ax_foot = fig.add_subplot(gs[4, :])
-    ax_foot.set_facecolor(BG); ax_foot.axis("off")
-    ax_foot.set_xlim(0, 1); ax_foot.set_ylim(0, 1)
-    ax_foot.axhline(0.92, color=DIVIDER, linewidth=0.8, xmin=0, xmax=1)
-    ax_foot.text(0.5, 0.35,
-                 "Fuente: TMDB  ·  ADY1104 Visualización de Datos  ·  Duoc UC 2026",
-                 ha="center", va="center", fontsize=7, color=MUTED,
-                 fontfamily="DejaVu Sans", transform=ax_foot.transAxes)
+    def texto(x, y, contenido, size=10, color=tinta,
+              bold=False, ha="left"):
+        ax.text(
+            x, y, contenido,
+            fontsize=size,
+            color=color,
+            fontweight="bold" if bold else "normal",
+            fontfamily="DejaVu Sans",
+            ha=ha,
+            va="top",
+            linespacing=1.35,
+        )
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=130, bbox_inches="tight",
-                facecolor=BG, edgecolor="none")
-    plt.close(fig)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode("utf-8")
+    try:
+        # Encabezado
+        caja(0.04, 0.845, 0.92, 0.12, oscuro)
+        texto(0.065, 0.947, "STREAMVIEW ANALYTICS",
+              10, "#C5B4FF", True)
+        texto(0.065, 0.919,
+              "¿Qué contenidos conviene promocionar?",
+              19, "white", True)
+        texto(0.065, 0.882,
+              f"{tipo_texto} · {int(inicio)}–{int(fin)}",
+              10, "#D4D8E4")
+        texto(0.065, 0.862,
+              f"Oportunidades: mínimo {min_votos} votos y al menos 1 voto",
+              9, "#D4D8E4")
+
+        # Indicadores
+        peliculas = int((df["type_label"] == "Película").sum())
+        series = int((df["type_label"] == "Serie").sum())
+
+        tarjetas = [
+            (
+                len(df),
+                "Títulos en la muestra",
+                f"{entero(peliculas)} películas · {entero(series)} series",
+            ),
+            (
+                len(elegibles),
+                "Títulos elegibles",
+                "Cumplen criterios de votos,\nvaloración y popularidad",
+            ),
+            (
+                conteos["Explorar descubrimiento"],
+                "Para explorar descubrimiento",
+                "Alta valoración y baja\npopularidad relativas",
+            ),
+        ]
+
+        for i, (valor, etiqueta, detalle) in enumerate(tarjetas):
+            x = 0.04 + i * 0.315
+            caja(x, 0.725, 0.29, 0.102)
+            texto(x + 0.018, 0.814, entero(valor), 25, morado, True)
+            texto(x + 0.018, 0.779, etiqueta, 9, tinta, True)
+            texto(x + 0.018, 0.758, detalle, 8, secundario)
+
+        # Géneros y hallazgo
+        caja(0.04, 0.495, 0.92, 0.213)
+        texto(0.065, 0.692, "01  ¿Qué géneros predominan?", 13, tinta, True)
+
+        if top_generos.empty:
+            texto(0.065, 0.649, "Sin géneros disponibles para esta selección.")
+        else:
+            maximo = top_generos["cantidad"].max()
+
+            for i, (_, fila) in enumerate(top_generos.iterrows()):
+                y = 0.649 - i * 0.03
+                nombre = traducciones.get(fila["genero"], fila["genero"])
+                texto(0.065, y, envolver(nombre, 23), 9)
+                caja(0.30, y - 0.014, 0.49, 0.009, "#EEEAF5", 0.003)
+                caja(
+                    0.30, y - 0.014,
+                    0.49 * fila["cantidad"] / maximo,
+                    0.009, morado, 0.003,
+                )
+                texto(0.93, y, entero(fila["cantidad"]), 10, ha="right")
+
+            lider = resumen.iloc[0]
+            nombre = traducciones.get(lider["genero"], lider["genero"])
+            if pd.notna(lider["puesto_pop"]):
+                hallazgo = (
+                    f"{nombre}: #1 en cantidad y "
+                    f"#{int(lider['puesto_pop'])} de {len(resumen)} "
+                    "en popularidad promedio."
+                )
+            else:
+                hallazgo = f"{nombre} lidera en cantidad de títulos."
+
+            caja(0.065, 0.513, 0.87, 0.052, "#F0E9FC")
+            texto(0.078, 0.555, envolver(hallazgo, 91), 9, tinta, True)
+
+        texto(0.065, 0.507,
+              "Un título puede pertenecer a varios géneros.",
+              8, secundario)
+
+        # Cuadrantes
+        caja(0.04, 0.265, 0.92, 0.214)
+        texto(0.065, 0.463, "02  ¿Dónde están las oportunidades?",
+              13, tinta, True)
+
+        descripciones = [
+            "Alta valoración · Baja popularidad",
+            "Alta valoración · Alta popularidad",
+            "Baja valoración · Baja popularidad",
+            "Baja valoración · Alta popularidad",
+        ]
+        colores = ["#EEE7FF", "#DEF2EA", "#EDF0F4", "#FFF1D6"]
+
+        for i, nombre in enumerate(nombres):
+            x = 0.065 + (i % 2) * 0.445
+            y = 0.365 - (i // 2) * 0.075
+            caja(x, y, 0.425, 0.067, colores[i], 0.008)
+            texto(x + 0.014, y + 0.059, nombre, 9, tinta, True)
+            texto(x + 0.014, y + 0.040,
+                  entero(conteos[nombre]), 20, tinta, True)
+            texto(x + 0.014, y + 0.015, descripciones[i], 8, secundario)
+
+        if med_pop is None:
+            nota = "Sin títulos elegibles: ajusta el período o el mínimo de votos."
+        else:
+            nota = (
+                f"Cortes relativos: popularidad {decimal(med_pop)} "
+                f"(redondeada) y valoración {decimal(med_val)}. "
+                "Igual a la mediana = alto."
+            )
+        texto(0.065, 0.282, nota, 8, secundario)
+
+        # Candidatos
+        caja(0.04, 0.11, 0.92, 0.14)
+        texto(0.065, 0.236,
+              "03  Candidatos para una prueba de descubrimiento",
+              12, tinta, True)
+        texto(0.065, 0.212, "TÍTULO / FORMATO", 8, secundario)
+        texto(0.77, 0.212, "NOTA /10", 8, secundario, ha="right")
+        texto(0.93, 0.212, "VOTOS", 8, secundario, ha="right")
+
+        if candidatos.empty:
+            texto(0.065, 0.181,
+                  "Sin candidatos en este cuadrante con los filtros actuales.",
+                  9, secundario)
+        else:
+            for i, (_, fila) in enumerate(candidatos.iterrows()):
+                y = 0.192 - i * 0.023
+                titulo = textwrap.shorten(
+                    str(fila["title"]), width=51, placeholder="…"
+                )
+                texto(0.065, y, f"{titulo} · {fila['type_label']}", 8.5)
+                texto(0.77, y, decimal(fila["vote_average"]), 9, ha="right")
+                texto(0.93, y, entero(fila["vote_count"]), 9, ha="right")
+
+        texto(0.065, 0.124,
+              "Ordenados por votos. “Descubrimiento” no significa desconocidos.",
+              8, secundario)
+
+        # Acción
+        caja(0.04, 0.055, 0.92, 0.043, oscuro)
+        texto(0.065, 0.089, "ACCIÓN SUGERIDA", 9, "#C5B4FF", True)
+        accion = (
+            "Probar una colección con estos candidatos y medir clics y reproducciones."
+            if not candidatos.empty
+            else "Revisar otros filtros para identificar candidatos a una prueba de promoción."
+        )
+        texto(0.065, 0.074, accion, 9, "white")
+
+        # Fuente y límites
+        texto(
+            0.04, 0.043,
+            "Fuente: datasets del proyecto con indicadores TMDB. "
+            "Popularidad no equivale a reproducciones.\n"
+            "Muestra seleccionada, no catálogo completo. "
+            "Medir campañas requiere datos adicionales.",
+            7.5, secundario,
+        )
+
+        buf = io.BytesIO()
+        fig.savefig(
+            buf,
+            format="png",
+            dpi=150,
+            facecolor=fondo,
+        )
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+    finally:
+        plt.close(fig)
 
 
 # ── ESTILOS CSS GLOBALES ─────────────────────────────────────────
@@ -742,10 +846,13 @@ def toggle_modal(*_):
     State("filtro-tipo", "value"),
     State("filtro-years", "value"),
     State("filtro-top", "value"),
+    State("filtro-min-votos", "value"),
     prevent_initial_call=True,
 )
-def descargar_png(n_clicks, tipo, year_range, top_n):
-    png_b64 = generar_infografia_png(tipo, year_range, top_n)
+def descargar_png(n_clicks, tipo, year_range, top_n, min_votos):
+    png_b64 = generar_infografia_png(
+        tipo, year_range, top_n, min_votos=min_votos
+    )
     png_bytes = base64.b64decode(png_b64)
     tipo_label = tipo.lower().replace("é","e").replace("í","i") if tipo and tipo != "Todos" else "catalogo"
     y0 = int(year_range[0]) if year_range else YEAR_MIN
@@ -758,11 +865,14 @@ def descargar_png(n_clicks, tipo, year_range, top_n):
     State("filtro-tipo", "value"),
     State("filtro-years", "value"),
     State("filtro-top", "value"),
+    State("filtro-min-votos", "value"),
     prevent_initial_call=True,
 )
-def descargar_pdf(n_clicks, tipo, year_range, top_n):
+def descargar_pdf(n_clicks, tipo, year_range, top_n, min_votos):
     from PIL import Image
-    png_b64 = generar_infografia_png(tipo, year_range, top_n)
+    png_b64 = generar_infografia_png(
+        tipo, year_range, top_n, min_votos=min_votos
+    )
     png_bytes = base64.b64decode(png_b64)
     img = Image.open(io.BytesIO(png_bytes))
     pdf_buf = io.BytesIO()
