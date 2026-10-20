@@ -395,10 +395,14 @@ def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30):
               "Un título puede pertenecer a varios géneros.",
               8, secundario)
 
-        # Cuadrantes
+        # ── PUNTO 2: CANTIDADES + EJEMPLOS ──────────────────
         caja(0.04, 0.265, 0.92, 0.214)
-        texto(0.065, 0.463, "02  ¿Dónde están las oportunidades?",
-              13, tinta, True)
+
+        texto(
+            0.065, 0.463,
+            "02  ¿Dónde están las oportunidades?",
+            13, tinta, True,
+        )
 
         descripciones = [
             "Alta valoración · Baja popularidad",
@@ -406,26 +410,122 @@ def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30):
             "Baja valoración · Baja popularidad",
             "Baja valoración · Alta popularidad",
         ]
-        colores = ["#EEE7FF", "#DEF2EA", "#EDF0F4", "#FFF1D6"]
 
-        for i, nombre in enumerate(nombres):
-            x = 0.065 + (i % 2) * 0.445
-            y = 0.365 - (i // 2) * 0.075
-            caja(x, y, 0.425, 0.067, colores[i], 0.008)
-            texto(x + 0.014, y + 0.059, nombre, 9, tinta, True)
-            texto(x + 0.014, y + 0.040,
-                  entero(conteos[nombre]), 20, tinta, True)
-            texto(x + 0.014, y + 0.015, descripciones[i], 8, secundario)
+        colores = [
+            "#EEE7FF",  # Explorar descubrimiento
+            "#DEF2EA",  # Candidatos para destacar
+            "#EDF0F4",  # Menor prioridad inicial
+            "#FFF1D6",  # Revisar expectativas
+        ]
 
+        # Conserva el orden de los cuatro grupos.
+        grupos = [
+            "Explorar descubrimiento",
+            "Candidatos para destacar",
+            "Menor prioridad inicial",
+            "Revisar expectativas",
+        ]
+
+        for i, nombre in enumerate(grupos):
+            # Cuatro filas: tarjeta izquierda + ejemplos derecha.
+            y = 0.402 - i * 0.040
+            alto = 0.038
+
+            caja(
+                0.065, y,
+                0.425, alto,
+                colores[i],
+                0.006,
+            )
+
+            # Tarjeta: nombre, cantidad y descripción.
+            texto(
+                0.078, y + 0.035,
+                nombre,
+                8, tinta, True,
+            )
+
+            texto(
+                0.078, y + 0.024,
+                entero(conteos.get(nombre, 0)),
+                14, tinta, True,
+            )
+
+            texto(
+                0.078, y + 0.009,
+                descripciones[i],
+                7, secundario,
+            )
+
+            # Selección dinámica de ejemplos del mismo cuadrante.
+            if (
+                not elegibles.empty
+                and "cuadrante" in elegibles.columns
+            ):
+                ejemplos = (
+                    elegibles[
+                        elegibles["cuadrante"] == nombre
+                    ]
+                    .sort_values(
+                        [
+                            "vote_count",
+                            "vote_average",
+                            "title",
+                            "show_id",
+                        ],
+                        ascending=[False, False, True, True],
+                    )
+                    .head(2)
+                )
+            else:
+                ejemplos = elegibles.iloc[:0]
+
+            texto(
+                0.52, y + 0.035,
+                "EJEMPLOS DEL GRUPO",
+                7, secundario,
+            )
+
+            if ejemplos.empty:
+                texto(
+                    0.52, y + 0.021,
+                    "Sin títulos con los filtros actuales.",
+                    8, secundario,
+                )
+            else:
+                for j, (_, fila) in enumerate(ejemplos.iterrows()):
+                    # Acorta títulos largos para que no se superpongan.
+                    titulo = textwrap.shorten(
+                        str(fila["title"]),
+                        width=43,
+                        placeholder="…",
+                    )
+
+                    texto(
+                        0.52,
+                        y + 0.023 - j * 0.012,
+                        titulo,
+                        8.5, tinta,
+                    )
+
+        # Nota breve: explica cómo se eligieron los ejemplos.
         if med_pop is None:
-            nota = "Sin títulos elegibles: ajusta el período o el mínimo de votos."
+            nota = (
+                "Sin títulos elegibles. Ajusta los años "
+                "o el mínimo de votos."
+            )
         else:
             nota = (
-                f"Cortes relativos: popularidad {decimal(med_pop)} "
-                f"(redondeada) y valoración {decimal(med_val)}. "
-                "Igual a la mediana = alto."
+                f"Ejemplos por cantidad de votos. Cortes: "
+                f"popularidad {decimal(med_pop)} "
+                f"y valoración {decimal(med_val)}; igualdad = alto."
             )
-        texto(0.065, 0.282, nota, 8, secundario)
+
+        texto(
+            0.065, 0.277,
+            nota,
+            7, secundario,
+        )
 
         # Candidatos
         caja(0.04, 0.11, 0.92, 0.14)
