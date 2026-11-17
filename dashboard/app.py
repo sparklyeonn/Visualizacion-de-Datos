@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import Dash, dcc, html, Input, Output, State, ctx, dash_table
+from dash import Dash, dcc, html, Input, Output, State, ctx, dash_table, ALL, no_update
 import dash_bootstrap_components as dbc
 from functools import lru_cache
 
@@ -44,6 +44,18 @@ C_ACCENT6  = "#EF4444"
 C_MOVIE    = "#7C3AED"
 C_SHOW     = "#06B6D4"
 C_HIGHLIGHT = "#F5A623"
+
+# Colores de acción sobre fondo claro (incluida la descarga) y oscuro.
+ACCIONES = {
+    "1 · Destacar": ("Candidatos para destacar", "#127547", "#58D79A"),
+    "2 · Descubrimiento": ("Explorar descubrimiento", "#205AB9", "#75A8FF"),
+    "3 · Revisar expectativas": ("Revisar expectativas", "#975800", "#F9BC55"),
+    "4 · Menor prioridad": ("Menor prioridad inicial", "#626D79", "#A8B2BE"),
+}
+NOTA_MEDIANAS = (
+    "Los cuadrantes se calculan utilizando las medianas de popularidad y valoración del segmento filtrado. "
+    "Las categorías representan posiciones relativas y no calificaciones absolutas de calidad o éxito comercial."
+)
 
 FONT = "Inter, system-ui, sans-serif"
 
@@ -84,22 +96,58 @@ combined = pd.concat([movies[COMMON], shows[COMMON]], ignore_index=True)
 # uid compuesto para no confundir películas y series con el mismo show_id
 combined["uid"] = combined["type_label"].str[:3] + "_" + combined["show_id"].astype(str)
 
+combined = combined.drop_duplicates("uid").reset_index(drop=True)
+# Normalizar los separadores una sola vez para filtros, rankings y descargas.
+for campo in ("genres", "country"):
+    combined[campo] = (combined[campo].str.strip()
+                       .str.replace(r"\s*,\s*", ", ", regex=True)
+                       .replace("", np.nan))
+
 YEAR_MIN = int(combined["year_added"].min())
 YEAR_MAX = int(combined["year_added"].max())
 
 # ── HELPERS ──────────────────────────────────────────────────────
-def filtrar(tipo="Todos", year_range=None):
-    df = combined.copy()
+def indice_etiquetas(columna):
+    # Agrupar las posiciones una sola vez. Cada título conserva una fila en combined.
+    etiquetas = combined[columna].dropna().str.split(",").explode().str.strip()
+    etiquetas = etiquetas[etiquetas.ne("")]
+    return {valor: grupo.index.unique().to_numpy()
+            for valor, grupo in etiquetas.groupby(etiquetas)}
+
+
+INDICES = {campo: indice_etiquetas(campo) for campo in ("genres", "country")}
+TITULOS_POR_ANIO = combined["year_added"].value_counts().sort_index()
+
+
+def seleccion(valores):
+    if isinstance(valores, str):
+        return [valores] if valores else []
+    return valores or []
+
+
+def filtrar(tipo="Todos", year_range=None, genero=None, pais=None, idioma=None, cruces=None):
+    mascara = np.ones(len(combined), dtype=bool)
     if tipo and tipo != "Todos":
-        df = df[df["type_label"] == tipo]
+        mascara &= combined["type_label"].eq(tipo).to_numpy()
     if year_range:
-        y0 = int(year_range[0])
-        y1 = int(year_range[1])
-        df = df[
-            (pd.to_numeric(df["year_added"], errors="coerce") >= y0) &
-            (pd.to_numeric(df["year_added"], errors="coerce") <= y1)
-        ]
-    return df
+        mascara &= combined["year_added"].between(*year_range).to_numpy()
+    if idioma:
+        mascara &= combined["language"].isin(seleccion(idioma)).to_numpy()
+
+    # OR en el desplegable. Cada cruce es una restricción extra y reversible.
+    activos = dict(cruces or [])
+    for campo, valores in (("genres", genero), ("country", pais)):
+        if valores:
+            coincide = np.zeros(len(combined), dtype=bool)
+            for valor in seleccion(valores):
+                coincide[INDICES[campo].get(valor, [])] = True
+            mascara &= coincide
+        if campo in activos:
+            coincide = np.zeros(len(combined), dtype=bool)
+            coincide[INDICES[campo].get(activos[campo], [])] = True
+            mascara &= coincide
+    return combined.loc[mascara].copy()
+
 
 def base_layout(title="", bg="#1A1D27", text="#E2E8F0", muted="#64748B", border="#2D3148"):
     return dict(
@@ -156,7 +204,7 @@ def kpi_card(label, value, subtitle="", color=C_ACCENT1, icon=""):
 # ══════════════════════════════════════════════════════════════════
 # GENERADOR DE INFOGRAFÍA
 # ══════════════════════════════════════════════════════════════════
-def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30):
+def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30, genero=None, pais=None, idioma=None, cruces=None):
     import base64
     import io
     import textwrap
@@ -167,7 +215,7 @@ def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30):
     from matplotlib.patches import FancyBboxPatch
 
     # ── DATOS ──────────────────────────────────────────────
-    df = filtrar(tipo, year_range).copy()
+    df = filtrar(tipo, year_range, genero, pais, idioma, cruces)
     df = df.drop_duplicates(["type_label", "show_id"])
 
     min_votos = max(0, int(min_votos or 0))
@@ -283,8 +331,23 @@ def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30):
     morado = "#7C3AED"
     oscuro = "#17182E"
 
-    fig = plt.figure(figsize=(10, 14), facecolor=fondo)
-    ax = fig.add_axes([0, 0, 1, 1])
+    detalles = []
+    for nombre, valores in (("Género", genero), ("País", pais), ("Idioma", idioma)):
+        if valores:
+            etiquetas = seleccion(valores)
+            if nombre == "Idioma":
+                etiquetas = [LANG_MAP.get(v, v) for v in etiquetas]
+            detalles.append(f"{nombre}: {', '.join(etiquetas)}")
+    for campo, valor in dict(cruces or []).items():
+        nombre = "género" if campo == "genres" else "país"
+        detalles.append(f"Clic en {nombre}: {valor}")
+    lineas_filtros = textwrap.wrap(" · ".join(detalles), width=95)
+    alto_extra = len(lineas_filtros) * 0.22
+    fig = plt.figure(figsize=(10, 14 + alto_extra), facecolor=fondo)
+    if lineas_filtros:
+        fig.text(0.065, 1 - 0.08 / (14 + alto_extra), "\n".join(lineas_filtros),
+                 va="top", fontsize=9, color=tinta)
+    ax = fig.add_axes([0, 0, 1, 14 / (14 + alto_extra)])
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
@@ -321,7 +384,7 @@ def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30):
               "¿Qué contenidos conviene promocionar?",
               19, "white", True)
         texto(0.065, 0.882,
-              f"{tipo_texto} · {int(inicio)}–{int(fin)}",
+              f"{tipo_texto} · {int(inicio)}–{int(fin)} · {len(df):,} títulos",
               10, "#D4D8E4")
         texto(0.065, 0.862,
               f"Oportunidades: mínimo {min_votos} votos y al menos 1 voto",
@@ -411,12 +474,7 @@ def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30):
             "Baja valoración · Alta popularidad",
         ]
 
-        colores = [
-            "#EEE7FF",  # Explorar descubrimiento
-            "#DEF2EA",  # Candidatos para destacar
-            "#EDF0F4",  # Menor prioridad inicial
-            "#FFF1D6",  # Revisar expectativas
-        ]
+        acentos = {nombre: claro for nombre, claro, oscuro in ACCIONES.values()}
 
         # Conserva el orden de los cuatro grupos.
         grupos = [
@@ -434,9 +492,11 @@ def generar_infografia_png(tipo, year_range, top_n=5, min_votos=30):
             caja(
                 0.065, y,
                 0.425, alto,
-                colores[i],
+                "#F2F4F7",
                 0.006,
             )
+
+            caja(0.065, y, 0.006, alto, acentos[nombre], 0.002)
 
             # Tarjeta: nombre, cantidad y descripción.
             texto(
@@ -630,6 +690,17 @@ sidebar_header = html.Div([
     html.Button("Menú", id="mobile-menu-btn", n_clicks=0, className="sv-mobile-menu-btn"),
 ], className="sv-sidebar-header", style={"marginBottom":"32px"})
 
+def selector_catalogo(id_control, etiqueta, opciones, placeholder):
+    return html.Div([
+        html.Label(etiqueta, htmlFor=id_control, style={
+            "fontSize": "11px", "fontWeight": "600", "color": C_TEXT_SIDEBAR,
+            "marginBottom": "6px",
+        }),
+        dcc.Dropdown(id=id_control, options=opciones, placeholder=placeholder,
+                     multi=True, value=[], clearable=True, searchable=True, style={"color": "#192337"}),
+    ], style={"marginBottom": "14px"})
+
+
 sidebar_body = html.Div([
     html.Div("FILTROS", style={
         "fontSize":"9px","fontWeight":"700","color":C_MUTED_SIDEBAR,
@@ -647,6 +718,18 @@ sidebar_body = html.Div([
         inputStyle={"marginRight":"8px","accentColor":C_ACCENT_PRIMARY},
         style={"marginBottom":"24px"}
     ),
+
+    selector_catalogo("filtro-genero", "Género", sorted(INDICES["genres"]), "Todos los géneros"),
+    selector_catalogo("filtro-pais", "País productor", sorted(INDICES["country"]), "Todos los países"),
+    selector_catalogo("filtro-idioma", "Idioma", [
+        {"label": LANG_MAP.get(codigo, codigo), "value": codigo}
+        for codigo in sorted(combined["language"].dropna().unique(), key=lambda c: LANG_MAP.get(c, c))
+    ], "Todos los idiomas"),
+
+    dbc.Button("Deshacer último clic", id="deshacer-cruce", size="sm", outline=True,
+               color="light", disabled=True, className="mb-2"),
+    dbc.Button("Restablecer filtros", id="restablecer-filtros", size="sm",
+               color="light", className="mb-3"),
 
     html.Div("Años de incorporación", style={
         "fontSize":"11px","fontWeight":"600","color":C_TEXT_SIDEBAR,"marginBottom":"10px"
@@ -752,6 +835,7 @@ sidebar = html.Div([
 app.layout = html.Div([
     dcc.Store(id="theme-mode", storage_type="local", data="system"),
     dcc.Store(id="theme-resolved", data="dark"),
+    dcc.Store(id="cruces", data=[]),
     dcc.Store(id="store-cuadrante", data="Todos"),
 
     dcc.Download(id="download-infografia"),
@@ -895,9 +979,13 @@ def update_title(tab):
     Output("kpi-row","children"),
     Input("filtro-tipo","value"),
     Input("filtro-years","value"),
+    Input("filtro-genero", "value"),
+    Input("filtro-pais", "value"),
+    Input("filtro-idioma", "value"),
+    Input("cruces", "data"),
 )
-def update_kpis(tipo, years):
-    df = filtrar(tipo, years)
+def update_kpis(tipo, years, genero=None, pais=None, idioma=None, cruces=None):
+    df = filtrar(tipo, years, genero, pais, idioma, cruces)
     total    = len(df)
     pel      = len(df[df["type_label"]=="Película"])
     ser      = len(df[df["type_label"]=="Serie"])
@@ -906,14 +994,18 @@ def update_kpis(tipo, years):
     pop_avg  = df["popularity"].mean()
     val_avg  = df["vote_average"].mean()
 
+    inicio, fin = years or (YEAR_MIN, YEAR_MAX)
+    base_periodo = int(TITULOS_POR_ANIO.loc[inicio:fin].sum())
+    porcentaje = total / base_periodo if base_periodo else 0
+    cobertura = f"{porcentaje:.1%} de {base_periodo:,} títulos del período"
     kpis = [
-        ("Total Contenidos",   f"{total:,}",       "catálogo completo",        C_HIGHLIGHT),
-        ("Películas",          f"{pel:,}",          f"{pel/total*100:.0f}% del total", C_MOVIE),
-        ("Series",             f"{ser:,}",          f"{ser/total*100:.0f}% del total", C_SHOW),
+        ("Total Contenidos",   f"{total:,}",       cobertura,        C_HIGHLIGHT),
+        ("Películas",          f"{pel:,}",          f"{pel/total:.0%} del total" if total else "Sin títulos", C_MOVIE),
+        ("Series",             f"{ser:,}",          f"{ser/total:.0%} del total" if total else "Sin títulos", C_SHOW),
         ("Países",             f"{paises}",          "países productores",       C_ACCENT4),
         ("Idiomas",            f"{idiomas}",         "idiomas disponibles",      C_ACCENT3),
-        ("Popularidad Prom.",  f"{pop_avg:.1f}",    "índice TMDB relativo",     C_ACCENT5),
-        ("Calificación Prom.", f"{val_avg:.2f}/10", "escala 0–10",              C_ACCENT6),
+        ("Popularidad Prom.",  f"{pop_avg:.1f}" if pd.notna(pop_avg) else "—",    "índice TMDB relativo",     C_TEXT),
+        ("Calificación Prom.", f"{val_avg:.2f}/10" if pd.notna(val_avg) else "—", "escala 0–10",              C_TEXT),
     ]
 
     cols = []
@@ -921,7 +1013,27 @@ def update_kpis(tipo, years):
         cols.append(
             dbc.Col(kpi_card(label, val, sub, color), xs=6, sm=4, md=3, style={"marginBottom":"0"})
         )
-    return dbc.Row(cols, className="g-2")
+    activos = dict(cruces or [])
+    filtros = [
+        ("Tipo", tipo or "Todos"),
+        ("País", " o ".join(seleccion(pais)) or "Todos"),
+        ("Período", f"{inicio}–{fin}"),
+        ("Género", " o ".join(seleccion(genero)) or "Todos"),
+        ("Idioma", " o ".join(LANG_MAP.get(v, v) for v in seleccion(idioma)) or "Todos"),
+    ]
+    for campo, valor in activos.items():
+        filtros.append(("Clic en país" if campo == "country" else "Clic en género", valor))
+    filtrado = (tipo not in ("Todos", None) or (inicio, fin) != (YEAR_MIN, YEAR_MAX)
+                or genero or pais or idioma or activos)
+    resumen = [html.Strong("Segmento analizado · " + ("Filtrado" if filtrado else "Catálogo completo"))]
+    resumen.extend(html.Span(f"{nombre}: {valor}") for nombre, valor in filtros)
+    if df["country"].str.contains(",", regex=False, na=False).any():
+        resumen.append(html.Span("Cada coproducción cuenta una vez en el total y una vez por país participante."))
+    return html.Div([
+        html.Div(resumen, style={"display": "flex", "flexWrap": "wrap", "gap": "4px 14px",
+                                 "color": C_TEXT, "fontSize": "12px", "marginBottom": "12px"}),
+        dbc.Row(cols, className="g-2"),
+    ])
 
 
 # ── CALLBACK: DESCARGA INFOGRAFÍA ────────────────────────────────
@@ -947,11 +1059,15 @@ def toggle_modal(*_):
     State("filtro-years", "value"),
     State("filtro-top", "value"),
     State("filtro-min-votos", "value"),
+    State("filtro-genero", "value"),
+    State("filtro-pais", "value"),
+    State("filtro-idioma", "value"),
+    State("cruces", "data"),
     prevent_initial_call=True,
 )
-def descargar_png(n_clicks, tipo, year_range, top_n, min_votos):
+def descargar_png(n_clicks, tipo, year_range, top_n, min_votos, genero=None, pais=None, idioma=None, cruces=None):
     png_b64 = generar_infografia_png(
-        tipo, year_range, top_n, min_votos=min_votos
+        tipo, year_range, top_n, min_votos, genero, pais, idioma, cruces
     )
     png_bytes = base64.b64decode(png_b64)
     tipo_label = tipo.lower().replace("é","e").replace("í","i") if tipo and tipo != "Todos" else "catalogo"
@@ -966,12 +1082,16 @@ def descargar_png(n_clicks, tipo, year_range, top_n, min_votos):
     State("filtro-years", "value"),
     State("filtro-top", "value"),
     State("filtro-min-votos", "value"),
+    State("filtro-genero", "value"),
+    State("filtro-pais", "value"),
+    State("filtro-idioma", "value"),
+    State("cruces", "data"),
     prevent_initial_call=True,
 )
-def descargar_pdf(n_clicks, tipo, year_range, top_n, min_votos):
+def descargar_pdf(n_clicks, tipo, year_range, top_n, min_votos, genero=None, pais=None, idioma=None, cruces=None):
     from PIL import Image
     png_b64 = generar_infografia_png(
-        tipo, year_range, top_n, min_votos=min_votos
+        tipo, year_range, top_n, min_votos, genero, pais, idioma, cruces
     )
     png_bytes = base64.b64decode(png_b64)
     img = Image.open(io.BytesIO(png_bytes))
@@ -984,14 +1104,62 @@ def descargar_pdf(n_clicks, tipo, year_range, top_n, min_votos):
     return dcc.send_bytes(pdf_buf.read(), f"streamview_resumen_{tipo_label}_{y0}_{y1}.pdf")
 
 
-# ── CALLBACK: CUADRANTE ──────────────────────────────────────────
+@app.callback(
+    Output("filtro-genero", "value"), Output("filtro-pais", "value"),
+    Output("filtro-idioma", "value"), Output("filtro-tipo", "value"),
+    Output("filtro-years", "value"), Output("filtro-top", "value"),
+    Output("filtro-min-votos", "value"), Output("filtro-min-titulos-genero", "value"),
+    Input("restablecer-filtros", "n_clicks"), prevent_initial_call=True,
+)
+def restablecer_filtros(_):
+    return [], [], [], "Todos", [YEAR_MIN, YEAR_MAX], 10, 30, 30
+
+
+@app.callback(
+    Output("cruces", "data"),
+    Input({"rol": "cruce", "campo": ALL}, "clickData"),
+    Input("deshacer-cruce", "n_clicks"), Input("restablecer-filtros", "n_clicks"),
+    State("cruces", "data"), prevent_initial_call=True,
+)
+def actualizar_cruces(clics, deshacer, restablecer, historial):
+    origen = ctx.triggered_id
+    historial = historial or []
+    if origen == "restablecer-filtros":
+        return []
+    if origen == "deshacer-cruce":
+        return historial[:-1]
+    if not isinstance(origen, dict):
+        return no_update
+    # Las gráficas se montan y desmontan al cambiar de vista.
+    for entrada, clic in zip(ctx.inputs_list[0], clics):
+        if entrada["id"] == origen and clic and clic.get("points"):
+            campo = origen["campo"]
+            valor = clic["points"][0].get("y")
+            if valor in INDICES[campo] and dict(historial).get(campo) != valor:
+                return historial + [[campo, valor]]
+    return no_update
+
+
+@app.callback(
+    Output("deshacer-cruce", "disabled"),
+    Input("cruces", "data"),
+)
+def mostrar_cruces(historial):
+    return not bool(historial)
+
+
 @app.callback(
     Output("store-cuadrante", "data"),
-    Input("selector-cuadrante", "value"),
+    Input({"rol": "selector-cuadrante", "vista": ALL}, "value"),
+    Input("restablecer-filtros", "n_clicks"), State("store-cuadrante", "data"),
     prevent_initial_call=True,
 )
-def actualizar_cuadrante(val):
-    return val or "Todos"
+def actualizar_cuadrante(valores, restablecer, anterior):
+    if ctx.triggered_id == "restablecer-filtros":
+        return "Todos"
+    if valores and valores[0] and valores[0] != anterior:
+        return valores[0]
+    return no_update
 
 
 # ── CALLBACK PRINCIPAL: TABS ─────────────────────────────────────
@@ -1005,9 +1173,16 @@ def actualizar_cuadrante(val):
     Input("filtro-min-votos","value"),
     Input("filtro-min-titulos-genero","value"),
     Input("store-cuadrante","data"),
+    Input("filtro-genero", "value"),
+    Input("filtro-pais", "value"),
+    Input("filtro-idioma", "value"),
+    Input("cruces", "data"),
 )
-def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cuadrante_sel):
-    df = filtrar(tipo, years)
+def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cuadrante_sel, genero=None, pais=None, idioma=None, cruces=None):
+    df = filtrar(tipo, years, genero, pais, idioma, cruces)
+
+    if df.empty:
+        return card(html.P("No hay títulos con esta combinación de filtros. Prueba quitar uno o ampliar los años."))
 
     tc = CHART_THEMES.get(theme, CHART_THEMES["dark"])
     BG_CHART, C_TEXT, C_MUTED, C_BORDER = tc["bg"], tc["text"], tc["muted"], tc["border"]
@@ -1040,7 +1215,7 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
         for _, row in df.dropna(subset=["genres"]).iterrows():
             for g in row["genres"].split(", "):
                 rows_g.append({"Género":g,"Tipo":row["type_label"]})
-        gdf = pd.DataFrame(rows_g)
+        gdf = pd.DataFrame(rows_g, columns=['Género', 'Tipo'])
         top_g = gdf["Género"].value_counts().head(top_n).reset_index()
         top_g.columns = ["Género","Cantidad"]
         top_g = top_g.sort_values("Cantidad")
@@ -1062,7 +1237,8 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
         lay2["yaxis"]["title"] = ""
         lay2["xaxis"]["showgrid"] = False
         lay2["margin"] = dict(l=8, r=60, t=44, b=8)
-        fig_gen.update_layout(**lay2, xaxis_range=[0, top_g["Cantidad"].max()*1.18])
+        lay2["title"]["text"] += " · Clic para filtrar"
+        fig_gen.update_layout(**lay2, xaxis_range=[0, top_g["Cantidad"].max() * 1.18] if not top_g.empty else None)
 
         rc = df.groupby(["rating_bin","type_label"], observed=True).size().reset_index(name="Cantidad")
         fig_rat = go.Figure()
@@ -1087,13 +1263,27 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
                              style={"height":"220px"}), padding="16px"), xs=12, lg=8),
             ], className="g-3 mb-3"),
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_gen, config={"displayModeBar":False,"responsive":True},
+                dbc.Col(card(dcc.Graph(id={"rol": "cruce", "campo": "genres"}, figure=fig_gen, config={"displayModeBar":False,"responsive":True},
                              style={"height":"320px"}), padding="16px"), width=12),
             ]),
         ])
 
     # ══ GEOGRAFÍA ═════════════════════════════════════════════════
     elif tab == "tab-geo":
+
+        pais_clic = dict(cruces or []).get("country")
+        destacados = set(seleccion(pais))
+        if pais_clic:
+            destacados.add(pais_clic)
+        azul = "#205AB9" if theme == "light" else "#75A8FF"
+        gris = "#737E8B" if theme == "light" else "#A8B2BE"
+        unidad = {"Serie": "series", "Película": "películas"}.get(tipo, "títulos")
+        foco = pais_clic or " o ".join(seleccion(pais))
+        if len(foco) > 35:
+            foco = f"{len(seleccion(pais))} países seleccionados"
+        def marca_pais(valores):
+            return dict(color=[azul if p in destacados else gris for p in valores],
+                        line=dict(width=[2 if p == pais_clic else 0 for p in valores], color=C_TEXT))
 
         paises_s = df["country"].dropna().str.split(", ").explode().str.strip()
 
@@ -1137,11 +1327,7 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
 
                 fig_gen_pais.add_trace(go.Bar(
                     x=df_plot["PopProm"], y=df_plot["País"], orientation="h",
-                    marker=dict(
-                        color=df_plot["PopProm"],
-                        colorscale=[[0, "rgba(245,166,35,0.35)"], [1, C_HIGHLIGHT]],
-                        showscale=False, line=dict(color="rgba(0,0,0,0)"),
-                    ),
+                    marker=marca_pais(df_plot["País"]),
                     text=[f"{g}  ·  {v:.1f}" for g, v in zip(df_plot["Género"], df_plot["PopProm"])],
                     textposition="outside", textfont=dict(color=C_TEXT, size=9),
                     hovertemplate=(
@@ -1184,48 +1370,49 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
 
         fig_paises = go.Figure(go.Bar(
             x=top_p["Cantidad"], y=top_p["País"], orientation="h",
-            marker=dict(
-                color=top_p["Cantidad"],
-                colorscale=[[0, "rgba(6,182,212,0.3)"], [1, C_ACCENT2]],
-                showscale=False, line=dict(color="rgba(0,0,0,0)")
-            ),
-            text=top_p["Cantidad"].apply(lambda x: f"{x:,}"),
+            marker=marca_pais(top_p["País"]),
+            customdata=["País del clic" if p == pais_clic else "País seleccionado" if p in destacados
+                        else "País coproductor" if destacados else "País productor" for p in top_p["País"]],
+            text=[f"{n:,} coprod." if destacados and p not in destacados else f"{n:,}"
+                  for p, n in zip(top_p["País"], top_p["Cantidad"])],
             textposition="outside", textfont=dict(color=C_TEXT, size=10),
-            hovertemplate="%{y}: %{x:,} títulos<extra></extra>",
+            hovertemplate="%{y} · %{customdata}<br>%{x:,} títulos del segmento<extra></extra>",
         ))
         lay_p = base_layout(f"Top {top_n} países productores",
                             bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
         lay_p["xaxis"]["title"] = "Cantidad de títulos"
         lay_p["yaxis"]["title"] = ""
         lay_p["xaxis"]["showgrid"] = False
-        lay_p["margin"] = dict(l=8, r=60, t=44, b=8)
-        fig_paises.update_layout(**lay_p, xaxis_range=[0, top_p["Cantidad"].max() * 1.18])
+        lay_p["margin"] = dict(l=8, r=80, t=44, b=8)
+        lay_p["title"]["text"] += " · Clic para filtrar"
+        fig_paises.update_layout(**lay_p, xaxis_range=[0, top_p["Cantidad"].max() * 1.18] if not top_p.empty else None)
 
         lang_s = df["lang_label"].value_counts().head(top_n).reset_index()
         lang_s.columns = ["Idioma", "Cantidad"]
         lang_s = lang_s.sort_values("Cantidad")
 
+        idiomas_activos = {LANG_MAP.get(v, v) for v in seleccion(idioma)}
         fig_lang = go.Figure(go.Bar(
             x=lang_s["Cantidad"], y=lang_s["Idioma"], orientation="h",
-            marker=dict(
-                color=lang_s["Cantidad"],
-                colorscale=[[0, "rgba(244,114,182,0.3)"], [1, C_ACCENT3]],
-                showscale=False, line=dict(color="rgba(0,0,0,0)")
-            ),
+            marker=dict(color=[azul if etiqueta in idiomas_activos else gris for etiqueta in lang_s["Idioma"]]),
             text=lang_s["Cantidad"].apply(lambda x: f"{x:,}"),
             textposition="outside", textfont=dict(color=C_TEXT, size=10),
             hovertemplate="%{y}: %{x:,} contenidos<extra></extra>",
         ))
         lay_l = base_layout(f"Top {top_n} idiomas disponibles",
                             bg=BG_CHART, text=C_TEXT, muted=C_MUTED, border=C_BORDER)
+        if foco:
+            lay_l["title"]["text"] = f"Idiomas de {len(df):,} {unidad} · {foco} (top {top_n})"
         lay_l["xaxis"]["title"] = "Cantidad de contenidos"
         lay_l["yaxis"]["title"] = ""
         lay_l["xaxis"]["showgrid"] = False
         lay_l["margin"] = dict(l=8, r=60, t=44, b=8)
-        fig_lang.update_layout(**lay_l, xaxis_range=[0, lang_s["Cantidad"].max() * 1.18])
+        fig_lang.update_layout(**lay_l, xaxis_range=[0, lang_s["Cantidad"].max() * 1.18] if not lang_s.empty else None)
 
         nota = html.Div(
-            "ℹ Un contenido con coproducción se contabiliza en cada país participante.  "
+            ("Países seleccionados en azul · Coproductores adicionales en gris. " if destacados else "")
+            + ("El borde indica el país elegido con un clic. " if pais_clic else "")
+            + "Una coproducción cuenta en cada país participante. "
             "El género más popular se determina por popularidad promedio (mín. 5 títulos por país).",
             style={"fontSize": "10px", "color": C_MUTED, "marginTop": "10px"}
         )
@@ -1237,7 +1424,7 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
                              style={"height": "420px"}), padding="16px"), width=12),
             ], className="g-3 mb-3"),
             dbc.Row([
-                dbc.Col(card(dcc.Graph(figure=fig_paises,
+                dbc.Col(card(dcc.Graph(id={"rol": "cruce", "campo": "country"}, figure=fig_paises,
                              config={"displayModeBar": False, "responsive": True},
                              style={"height": "300px"}), padding="16px"), xs=12, lg=6),
                 dbc.Col(card(dcc.Graph(figure=fig_lang,
@@ -1397,12 +1584,9 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
                 df_resaltado = df_elig
                 df_atenuado  = pd.DataFrame(columns=df_elig.columns)
 
-            COLORES_CUAD = {
-                "1 · Destacar":             C_ACCENT4,
-                "2 · Descubrimiento":       C_ACCENT5,
-                "3 · Revisar expectativas": C_ACCENT6,
-                "4 · Menor prioridad":      C_MUTED,
-            }
+            colores_accion = {clave: oscuro if theme == "dark" else claro
+                              for clave, (nombre, claro, oscuro) in ACCIONES.items()}
+            simbolos = {"Película": "circle", "Serie": "diamond"}
 
             fig_sc = go.Figure()
 
@@ -1413,14 +1597,15 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
                     y=df_atenuado["vote_average"],
                     mode="markers",
                     name="Otros cuadrantes",
-                    marker=dict(color="#64748B", size=5, opacity=0.18,
+                    marker=dict(color=df_atenuado["cuadrante"].map(colores_accion),
+                                symbol=df_atenuado["type_label"].map(simbolos), size=5, opacity=0.18,
                                 line=dict(color="rgba(0,0,0,0)")),
                     hoverinfo="skip",
                     showlegend=False,
                 ))
 
             # Puntos resaltados por formato
-            for tipo_val, color_base in [("Película", C_MOVIE), ("Serie", C_SHOW)]:
+            for tipo_val, simbolo in simbolos.items():
                 d = df_resaltado[df_resaltado["type_label"] == tipo_val]
                 if len(d) == 0:
                     continue
@@ -1429,8 +1614,8 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
                     x=d["popularity"],
                     y=d["vote_average"],
                     mode="markers",
-                    name=tipo_val,
-                    marker=dict(color=color_base, size=6, opacity=0.65,
+                    name=f"{tipo_val} ({'círculo' if simbolo == 'circle' else 'rombo'})",
+                    marker=dict(color=d["cuadrante"].map(colores_accion), symbol=simbolo, size=6, opacity=0.9,
                                 line=dict(color="rgba(0,0,0,0)")),
                     customdata=np.column_stack([
                         d["type_label"].values,
@@ -1473,13 +1658,14 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
             lay_sc["xaxis"]["type"] = "log"
             lay_sc["yaxis"]["title"] = "Calificación (0–10)"
             lay_sc["yaxis"]["range"] = [0, 10.5]
+            lay_sc["showlegend"] = True
             lay_sc["margin"] = dict(l=8, r=16, t=52, b=8)
             fig_sc.update_layout(**lay_sc)
 
             # Etiquetas de cuadrantes en las esquinas
             cuad_labels = [
                 (0.98, 0.98, "Alta pop · Alta cal\nCandidatos para destacar",  "right", "top"),
-                (0.02, 0.98, "Baja pop · Alta cal\nCandidatos para descubrir", "left",  "top"),
+                (0.02, 0.98, "Baja pop · Alta cal\nExplorar descubrimiento", "left",  "top"),
                 (0.98, 0.02, "Alta pop · Baja cal\nRevisar expectativas",       "right", "bottom"),
                 (0.02, 0.02, "Baja pop · Baja cal\nMenor prioridad inicial",    "left",  "bottom"),
             ]
@@ -1503,7 +1689,7 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
             selector_cuad = html.Div([
                 html.Span("Cuadrante: ", style={"fontSize":"11px","color":C_MUTED,"marginRight":"8px"}),
                 dcc.Dropdown(
-                    id="selector-cuadrante",
+                    id={"rol": "selector-cuadrante", "vista": "pop"},
                     options=opciones_cuad,
                     value=cuadrante_sel if cuadrante_sel else "Todos",
                     clearable=False,
@@ -1587,6 +1773,13 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
                 card([
                     selector_cuad,
                     aviso_cuad or html.Span(),
+                    html.Div([
+                        html.Span([html.Span("● ", style={"color": colores_accion[clave]}), datos[0]])
+                        for clave, datos in ACCIONES.items()
+                    ],
+                       style={"display": "flex", "flexWrap": "wrap", "gap": "4px 14px",
+                              "fontSize": "12px", "color": C_TEXT}),
+                    html.P(NOTA_MEDIANAS, style={"fontSize": "12px", "color": C_TEXT, "margin": "6px 0"}),
                     dcc.Graph(figure=fig_sc, config={"displayModeBar": False, "responsive": True},
                               style={"height": "420px"}),
                     conteo_label,
@@ -1817,7 +2010,7 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
         for _, row in df.dropna(subset=["genres"]).iterrows():
             for g in row["genres"].split(", "):
                 rows_pg.append({"Género":g,"popularity":row["popularity"]})
-        pgdf = pd.DataFrame(rows_pg)
+        pgdf = pd.DataFrame(rows_pg, columns=['Género', 'popularity'])
         top_pg = pgdf.groupby("Género")["popularity"].mean().nlargest(top_n).reset_index()
         top_pg.columns = ["Género","Popularidad promedio"]
         top_pg = top_pg.sort_values("Popularidad promedio")
@@ -1839,13 +2032,13 @@ def render_tab(tab, tipo, years, top_n, theme, min_votos, min_titulos_genero, cu
         lay_pg["yaxis"]["title"] = ""
         lay_pg["xaxis"]["showgrid"] = False
         lay_pg["margin"] = dict(l=8, r=50, t=44, b=8)
-        fig_pg.update_layout(**lay_pg, xaxis_range=[0, top_pg["Popularidad promedio"].max()*1.18])
+        fig_pg.update_layout(**lay_pg, xaxis_range=[0, top_pg["Popularidad promedio"].max() * 1.18] if not top_pg.empty else None)
 
         rows_cp = []
         for _, row in df.dropna(subset=["country"]).iterrows():
             for c in row["country"].split(", "):
                 rows_cp.append({"País": c.strip(), "vote_average": row["vote_average"]})
-        cpdf = pd.DataFrame(rows_cp)
+        cpdf = pd.DataFrame(rows_cp, columns=['País', 'vote_average'])
         country_stats = cpdf.groupby("País")["vote_average"].agg(["mean","count"]).reset_index()
         country_stats = country_stats[country_stats["count"] >= 30]
         top_cp = country_stats.nlargest(top_n, "mean")[["País","mean"]].copy()
